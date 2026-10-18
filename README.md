@@ -167,6 +167,55 @@ Evidence images: http://localhost:8000/evidence/<filename>.jpg
 
 `NEW_OBJECT_DETECTED` alerts are informational: they appear in the feed when a new track ID first appears, but they do not trigger the alarm.
 
+## Multi-camera setup and demo
+
+IBVAP supports multi-camera surveillance using USB webcams, RTSP/HTTP network streams, or smartphone cameras running video stream apps.
+
+### 1. Using Phones as Cameras
+- Install **IP Webcam** (Android) or similar MJPEG/RTSP stream app.
+- Connect your phone and PC to the **same Wi-Fi hotspot** or local network.
+- Start the server in the app; it will display an address such as `http://192.168.43.5:8080`.
+- Verify the video stream by opening `http://<ip>:8080/video` in your desktop web browser first.
+
+### 2. Configure `cameras.json`
+Copy the example camera configuration and customize your camera sources and boundaries:
+```powershell
+Copy-Item cameras.example.json cameras.json
+```
+Edit `cameras.json` to configure:
+- `source`: phone stream URL (e.g. `http://192.168.43.5:8080/video`), webcam index (e.g. `0`), or video file path (`sample_data/clip1.mp4`).
+- `fence`: normalized coordinates (`start: [x, y]`, `end: [x, y]`) and `alert_direction` (`"ANY"`, `"A_TO_B"`, `"B_TO_A"`).
+- `zone`: list of normalized polygon points (`[[x, y], ...]`).
+
+### 3. Check Camera Streams Before Demo
+Verify that all configured camera feeds are accessible and returning frames:
+```powershell
+python scripts/check_cameras.py
+```
+Each camera will print a status line: `<camera_id> | OK | <resolution> | <source>`. If any camera fails, the script exits with code 1 so you can fix connections before presenting.
+
+### 4. One-Click Launch (`run.bat`)
+Run the entire platform (backend, frontend, and browser launch) with a single command:
+```powershell
+.\run.bat
+```
+To stop both services cleanly, run:
+```powershell
+.\stop.bat
+```
+
+### 5. Running Tests
+Run the test suite to verify system integrity:
+```powershell
+pytest -q
+```
+
+### 6. Troubleshooting
+- **Phone IP changed**: Mobile hotspot DHCP can reassign IP addresses if phones disconnect. Re-check the IP in the IP Webcam app and update `cameras.json`.
+- **Firewall blocking streams**: Ensure Windows Defender Firewall allows incoming connections on ports 8000 (backend) and 8080 (frontend/IP Webcam).
+- **Python version**: Use Python 3.13 only (`py -3.13 --version`). Python 3.14+ may lack prebuilt OpenCV/NumPy wheels.
+- **Virtual environment not activated**: Always run `.\venv\Scripts\Activate.ps1` in PowerShell before running Python scripts or commands directly.
+
 ## API Reference
 
 Base URL:

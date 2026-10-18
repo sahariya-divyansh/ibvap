@@ -302,3 +302,4 @@ IBVAP_RESTRICTED_ZONE=0.62,0.18;0.95,0.18;0.95,0.82;0.62,0.82
 - Task D3: Added threaded stream reader with latest-frame buffer, exponential backoff reconnect, and status machine.
 - Tasks D4+D5: Added per-camera live state, CameraWorker with isolated model/tracker state, CameraManager, and main lifespan integration.
 - Task H3: Hide reviewed alerts by default, animated dismiss on ack, show-reviewed toggle with persistence, and active alerts counter.
+- Task D10: Added run.bat, stop.bat, scripts/check_cameras.py with tests, and multi-camera documentation in README.md.

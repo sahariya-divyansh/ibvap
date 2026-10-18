@@ -8,6 +8,7 @@ Divyansh updates this file when merging each PR. Contributors propose the entry 
 ## [Unreleased]
 
 ### Added (planned for v1.0-demo)
+- One-click release launcher run.bat, stop.bat, and camera pre-check script [D10]
 - Dismiss reviewed alerts with smooth collapse animation, reviewed toggle, and pending alert counter [H3]
 - Per-camera workers, camera manager, and thread-safe per-camera live state with legacy fallback [D4, D5]
 - Threaded stream reader with latest-frame buffer, exponential backoff reconnect, and status machine [D3]
