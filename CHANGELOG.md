@@ -8,6 +8,7 @@ Divyansh updates this file when merging each PR. Contributors propose the entry 
 ## [Unreleased]
 
 ### Added (planned for v1.0-demo)
+- Camera registry loader, schema validation, and geometry resolver with legacy fallback [D2]
 - Multi-camera support via `cameras.json` (per-camera worker, YOLO/tracker, fence, zone) — D2–D6
 - Auto-reconnecting stream reader; `CAMERA_OFFLINE` / `CAMERA_ONLINE` events — D3
 - Severity levels (LOW/MEDIUM/HIGH) — K1

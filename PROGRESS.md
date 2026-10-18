@@ -298,3 +298,4 @@ IBVAP_RESTRICTED_ZONE=0.62,0.18;0.95,0.18;0.95,0.82;0.62,0.82
 - Browser audio may require one user interaction before the first audible beep; the dashboard unlocks audio on the first pointer interaction.
 - Counts require tracker IDs, so first frames before ByteTrack assigns IDs may briefly show zero.
 - If no webcam or configured video source is available, `/stats` stays at zero and `/video_feed` waits for the detector to publish a frame.
+- Task D2: Added camera registry loader, Pydantic v2 schemas, geometry resolver, and tests.
