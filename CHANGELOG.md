@@ -8,6 +8,7 @@ Divyansh updates this file when merging each PR. Contributors propose the entry 
 ## [Unreleased]
 
 ### Added (planned for v1.0-demo)
+- Per-camera workers, camera manager, and thread-safe per-camera live state with legacy fallback [D4, D5]
 - Threaded stream reader with latest-frame buffer, exponential backoff reconnect, and status machine [D3]
 - Camera registry loader, schema validation, and geometry resolver with legacy fallback [D2]
 - Multi-camera support via `cameras.json` (per-camera worker, YOLO/tracker, fence, zone) — D2–D6

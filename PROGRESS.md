@@ -300,3 +300,4 @@ IBVAP_RESTRICTED_ZONE=0.62,0.18;0.95,0.18;0.95,0.82;0.62,0.82
 - If no webcam or configured video source is available, `/stats` stays at zero and `/video_feed` waits for the detector to publish a frame.
 - Task D2: Added camera registry loader, Pydantic v2 schemas, geometry resolver, and tests.
 - Task D3: Added threaded stream reader with latest-frame buffer, exponential backoff reconnect, and status machine.
+- Tasks D4+D5: Added per-camera live state, CameraWorker with isolated model/tracker state, CameraManager, and main lifespan integration.

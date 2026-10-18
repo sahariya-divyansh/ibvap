@@ -15,6 +15,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.camera_config import CameraConfigError, load_cameras
+from backend.camera_manager import CameraManager
 from backend.config import Settings, get_settings
 from backend.db import get_event, init_db, list_events, update_event_ack
 from backend.detector import Detector
@@ -28,6 +30,7 @@ detector_stop_event = threading.Event()
 detector_thread: threading.Thread | None = None
 detector_lock = threading.Lock()
 live_state = LiveDetectorState()
+camera_manager: CameraManager | None = None
 
 
 class AckRequest(BaseModel):
@@ -38,11 +41,26 @@ class AckRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize storage and start/stop the detector worker."""
+    """Initialize storage and start/stop camera workers."""
+    global camera_manager
     init_db(settings.database_path)
     settings.evidence_dir.mkdir(parents=True, exist_ok=True)
-    start_detector_thread(settings)
+
+    try:
+        cameras = load_cameras()
+    except CameraConfigError as exc:
+        LOGGER.critical("Invalid camera configuration: %s", exc)
+        raise RuntimeError(f"Invalid camera configuration: {exc}") from exc
+
+    camera_manager = CameraManager(
+        cameras=cameras,
+        settings=settings,
+        live_state=live_state,
+    )
+    camera_manager.start_all()
     yield
+    if camera_manager is not None:
+        camera_manager.stop_all()
     detector_stop_event.set()
 
 
@@ -145,6 +163,17 @@ def run_detector(settings: Settings, stop_event: threading.Event) -> None:
 def generate_mjpeg_frames():
     """Yield JPEG-encoded latest frames for MJPEG clients."""
     while not detector_stop_event.is_set():
+        jpeg_bytes = live_state.get_jpeg()
+        if jpeg_bytes is not None:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + jpeg_bytes
+                + b"\r\n"
+            )
+            time.sleep(0.04)
+            continue
+
         frame = live_state.get_frame()
         if frame is None:
             time.sleep(0.1)
