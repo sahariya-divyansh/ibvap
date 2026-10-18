@@ -176,6 +176,8 @@ class CameraWorker:
             "confidence": 1.0,
             "evidence_path": "",
             "ack_status": "pending",
+            "severity": "HIGH" if event_type == "CAMERA_OFFLINE" else "LOW",
+            "extra": {},
         }
         try:
             self._dispatch_event(event)
@@ -333,6 +335,9 @@ class CameraWorker:
                         else []
                     )
 
+                    latency_ms = max(0.0, (self._clock() - capture_ts) * 1000.0)
+                    latency_int = round(latency_ms)
+
                     # Handle first-seen tracks
                     for detection in detections:
                         if detection.track_id not in self.seen_track_ids:
@@ -344,6 +349,7 @@ class CameraWorker:
                                 detection.track_id,
                             )
                             event = build_new_object_event(self.cam.camera_id, detection)
+                            event["extra"] = {"latency_ms": latency_int}
                             self._dispatch_event(event)
 
                     # Evaluate fence and zone crossings
@@ -359,6 +365,7 @@ class CameraWorker:
 
                     det_map = {d.track_id: d for d in detections}
                     for ev in events:
+                        ev["extra"] = {"latency_ms": latency_int}
                         track_det = det_map.get(int(ev["track_id"]))
                         self._dispatch_event(ev, frame=frame, detection=track_det)
 
