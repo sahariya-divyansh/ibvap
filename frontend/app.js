@@ -1,6 +1,7 @@
 const API_BASE_URL = "http://localhost:8000";
 const POLL_INTERVAL_MS = 2500;
 const STATS_POLL_INTERVAL_MS = 1500;
+const STORAGE_KEY_SHOW_REVIEWED = "ibvap_show_reviewed";
 const ALARM_EVENT_TYPES = new Set([
   "VIRTUAL_FENCE_CROSS",
   "RESTRICTED_ZONE_ENTRY",
@@ -17,18 +18,104 @@ const alarmBanner = document.querySelector("#alarm-banner");
 const personCount = document.querySelector("#person-count");
 const vehicleCount = document.querySelector("#vehicle-count");
 const animalCount = document.querySelector("#animal-count");
-const renderedEvents = new Map();
+const reviewedToggle = document.querySelector("#reviewed-toggle");
+const reviewedFeed = document.querySelector("#reviewed-feed");
+
+const renderedPending = new Map();
+const renderedReviewed = new Map();
+const dismissedIds = new Set();
+let latestEvents = [];
+let cachedReviewedCount = 0;
 let initialPollComplete = false;
+let showReviewed = getStoredShowReviewed();
 let audioContext;
 
 window.addEventListener("DOMContentLoaded", () => {
   cameraToggle.addEventListener("click", toggleCamera);
+  if (reviewedToggle) {
+    reviewedToggle.addEventListener("click", toggleReviewed);
+    updateReviewedToggleUI(0);
+  }
+  if (reviewedFeed) {
+    reviewedFeed.hidden = !showReviewed;
+  }
   document.addEventListener("pointerdown", unlockAudio, { once: true });
   pollEvents();
   pollStats();
   setInterval(pollEvents, POLL_INTERVAL_MS);
   setInterval(pollStats, STATS_POLL_INTERVAL_MS);
 });
+
+function getStoredShowReviewed() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_SHOW_REVIEWED) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function setStoredShowReviewed(value) {
+  try {
+    localStorage.setItem(STORAGE_KEY_SHOW_REVIEWED, String(value));
+  } catch {
+    // Ignore localStorage failures (e.g. private mode or disabled storage)
+  }
+}
+
+function toggleReviewed() {
+  showReviewed = !showReviewed;
+  setStoredShowReviewed(showReviewed);
+  if (reviewedFeed) {
+    reviewedFeed.hidden = !showReviewed;
+  }
+  if (showReviewed) {
+    populateReviewedFeed();
+  } else {
+    clearReviewedFeed();
+  }
+  const reviewedCount = latestEvents.filter(
+    (e) => (e.ack_status && e.ack_status !== "pending") || dismissedIds.has(e.event_id)
+  ).length;
+  updateReviewedToggleUI(reviewedCount);
+}
+
+function updateReviewedToggleUI(count) {
+  if (!reviewedToggle) {
+    return;
+  }
+  if (count !== undefined) {
+    cachedReviewedCount = count;
+  }
+  const n = cachedReviewedCount;
+  reviewedToggle.setAttribute("aria-pressed", String(showReviewed));
+  reviewedToggle.classList.toggle("active", showReviewed);
+  reviewedToggle.textContent = showReviewed
+    ? `Hide reviewed (${n})`
+    : `Show reviewed (${n})`;
+}
+
+function populateReviewedFeed() {
+  if (!reviewedFeed) {
+    return;
+  }
+  const reviewedEvents = latestEvents.filter(
+    (e) => (e.ack_status && e.ack_status !== "pending") || dismissedIds.has(e.event_id)
+  );
+  for (const event of [...reviewedEvents].reverse()) {
+    if (!renderedReviewed.has(event.event_id)) {
+      const element = createAlertElement(event, true);
+      renderedReviewed.set(event.event_id, element);
+      reviewedFeed.prepend(element);
+    }
+  }
+}
+
+function clearReviewedFeed() {
+  for (const element of renderedReviewed.values()) {
+    element.remove();
+  }
+  renderedReviewed.clear();
+}
 
 async function pollEvents() {
   try {
@@ -39,9 +126,8 @@ async function pollEvents() {
 
     const events = await response.json();
     connectionStatus.textContent = `Live - refreshed ${new Date().toLocaleTimeString()}`;
-    renderNewEvents(events, initialPollComplete);
+    renderEvents(events, initialPollComplete);
     initialPollComplete = true;
-    updateSummary();
   } catch (error) {
     connectionStatus.textContent = `Backend unavailable: ${error.message}`;
   }
@@ -65,28 +151,77 @@ async function pollStats() {
   }
 }
 
-function renderNewEvents(events, shouldAlarm) {
-  for (const event of [...events].reverse()) {
-    const existing = renderedEvents.get(event.event_id);
-    if (existing) {
-      syncAckState(existing, event);
-      continue;
-    }
+function renderEvents(events, shouldAlarm) {
+  latestEvents = events;
+  const serverEventIds = new Set(events.map((e) => e.event_id));
 
-    const element = createAlertElement(event);
-    renderedEvents.set(event.event_id, element);
-    feed.prepend(element);
-    if (shouldAlarm && ALARM_EVENT_TYPES.has(event.event_type)) {
-      triggerAlarm();
+  // Prune pending cards whose IDs the server no longer returns
+  for (const [id, element] of renderedPending.entries()) {
+    if (!serverEventIds.has(id)) {
+      element.remove();
+      renderedPending.delete(id);
     }
   }
+
+  // Prune reviewed cards whose IDs the server no longer returns
+  for (const [id, element] of renderedReviewed.entries()) {
+    if (!serverEventIds.has(id)) {
+      element.remove();
+      renderedReviewed.delete(id);
+      dismissedIds.delete(id);
+    }
+  }
+
+  let reviewedCount = 0;
+
+  for (const event of [...events].reverse()) {
+    const isDismissed = dismissedIds.has(event.event_id);
+    const isPending = (event.ack_status === "pending" || !event.ack_status) && !isDismissed;
+
+    if (isPending) {
+      if (!renderedPending.has(event.event_id)) {
+        const element = createAlertElement(event, false);
+        renderedPending.set(event.event_id, element);
+        feed.prepend(element);
+        if (shouldAlarm && ALARM_EVENT_TYPES.has(event.event_type)) {
+          triggerAlarm();
+        }
+      }
+    } else {
+      reviewedCount++;
+      // If card is currently displayed in pending, remove it
+      if (renderedPending.has(event.event_id)) {
+        renderedPending.get(event.event_id).remove();
+        renderedPending.delete(event.event_id);
+      }
+      if (showReviewed && reviewedFeed) {
+        const effectiveStatus = event.ack_status || "confirmed";
+        const existing = renderedReviewed.get(event.event_id);
+        if (existing) {
+          syncReviewedState(existing, effectiveStatus);
+        } else {
+          const element = createAlertElement(event, true);
+          renderedReviewed.set(event.event_id, element);
+          reviewedFeed.prepend(element);
+        }
+      }
+    }
+  }
+
+  updateSummary();
+  updateReviewedToggleUI(reviewedCount);
 }
 
-function createAlertElement(event) {
+function createAlertElement(event, isReviewed = false) {
   const article = document.createElement("article");
+  const status = event.ack_status || "pending";
   article.className = `alert severity-${severityClass(event.event_type)}`;
-  article.dataset.eventId = event.event_id;
-  article.dataset.ackStatus = event.ack_status || "pending";
+  article.dataset.eventId = String(event.event_id);
+  article.dataset.ackStatus = status;
+
+  if (isReviewed || status !== "pending") {
+    article.classList.add("handled");
+  }
 
   const body = document.createElement("div");
   body.className = "alert-body";
@@ -100,7 +235,7 @@ function createAlertElement(event) {
 
   const ackBadge = document.createElement("span");
   ackBadge.className = "ack-badge";
-  ackBadge.textContent = event.ack_status || "pending";
+  ackBadge.textContent = status;
 
   heading.append(eventType, ackBadge);
 
@@ -114,12 +249,20 @@ function createAlertElement(event) {
 
   const actions = document.createElement("div");
   actions.className = "actions";
-  actions.append(
-    createAckButton("Confirm", "confirmed", event.event_id),
-    createAckButton("Reject", "rejected", event.event_id),
-  );
+  if (!isReviewed && status === "pending") {
+    actions.append(
+      createAckButton("Confirm", "confirmed", event.event_id),
+      createAckButton("Reject", "rejected", event.event_id),
+    );
+  } else {
+    const label = document.createElement("span");
+    label.className = "handled-label";
+    label.textContent = status;
+    actions.append(label);
+  }
 
   body.append(heading, details, actions);
+
   if (event.evidence_path) {
     const evidence = document.createElement("img");
     evidence.className = "evidence";
@@ -133,10 +276,6 @@ function createAlertElement(event) {
   } else {
     article.classList.add("no-evidence");
     article.append(body);
-  }
-
-  if ((event.ack_status || "pending") !== "pending") {
-    markHandled(article, event.ack_status);
   }
 
   return article;
@@ -162,12 +301,17 @@ function createAckButton(label, status, eventId) {
 }
 
 async function acknowledge(eventId, status) {
-  const element = renderedEvents.get(eventId);
+  const element = renderedPending.get(eventId);
   if (!element) {
     return;
   }
 
   setButtonsDisabled(element, true);
+  const existingError = element.querySelector(".inline-error");
+  if (existingError) {
+    existingError.remove();
+  }
+
   try {
     const response = await fetch(`${API_BASE_URL}/events/${eventId}/ack`, {
       method: "POST",
@@ -180,27 +324,85 @@ async function acknowledge(eventId, status) {
     }
 
     const updatedEvent = await response.json();
-    markHandled(element, updatedEvent.ack_status);
+    const finalStatus = updatedEvent.ack_status || status;
+    dismissedIds.add(eventId);
+
+    const cached = latestEvents.find((e) => e.event_id === eventId);
+    if (cached) {
+      cached.ack_status = finalStatus;
+    }
+
+    // Immediately remove from pending tracking and update counter
+    renderedPending.delete(eventId);
+    updateSummary();
+
+    // Trigger collapse/fade animation (~250 ms)
+    element.style.maxHeight = `${element.offsetHeight}px`;
+    void element.offsetHeight;
+    element.classList.add("dismissing");
+
+    setTimeout(() => {
+      element.remove();
+      if (showReviewed && reviewedFeed) {
+        addReviewedCard(eventId, finalStatus, cached, element);
+      }
+    }, 250);
+
+    const reviewedCount = latestEvents.filter(
+      (e) => (e.ack_status && e.ack_status !== "pending") || dismissedIds.has(e.event_id)
+    ).length;
+    updateReviewedToggleUI(reviewedCount);
   } catch (error) {
     connectionStatus.textContent = `Ack failed: ${error.message}`;
     setButtonsDisabled(element, false);
+    const actions = element.querySelector(".actions");
+    if (actions) {
+      const errorMsg = document.createElement("span");
+      errorMsg.className = "inline-error";
+      errorMsg.textContent = "Could not save, try again";
+      actions.append(errorMsg);
+      setTimeout(() => errorMsg.remove(), 4000);
+    }
   }
 }
 
-function syncAckState(element, event) {
-  const status = event.ack_status || "pending";
-  if (status !== "pending" && element.dataset.ackStatus !== status) {
-    markHandled(element, status);
+function addReviewedCard(eventId, status, cached, originalElement) {
+  if (renderedReviewed.has(eventId)) {
+    return;
+  }
+  let eventData = cached;
+  if (!eventData && originalElement) {
+    eventData = {
+      event_id: eventId,
+      event_type: originalElement.querySelector(".event-type")?.textContent || "EVENT",
+      ack_status: status,
+      object_type: originalElement.querySelector(".details dd")?.textContent || "unknown",
+      track_id: 0,
+      confidence: 1.0,
+      camera_id: "cam_01",
+      timestamp: new Date().toISOString(),
+      evidence_path: "",
+    };
+  }
+  if (eventData) {
+    const reviewedCard = createAlertElement({ ...eventData, ack_status: status }, true);
+    renderedReviewed.set(eventId, reviewedCard);
+    if (reviewedFeed) {
+      reviewedFeed.prepend(reviewedCard);
+    }
   }
 }
 
-function markHandled(element, status) {
+function syncReviewedState(element, status) {
   element.dataset.ackStatus = status;
-  element.classList.add("handled");
-  element.querySelector(".ack-badge").textContent = status;
-  const actions = element.querySelector(".actions");
-  actions.innerHTML = `<span class="handled-label">${status}</span>`;
-  updateSummary();
+  const badge = element.querySelector(".ack-badge");
+  if (badge) {
+    badge.textContent = status;
+  }
+  const label = element.querySelector(".handled-label");
+  if (label) {
+    label.textContent = status;
+  }
 }
 
 function setButtonsDisabled(element, disabled) {
@@ -210,11 +412,9 @@ function setButtonsDisabled(element, disabled) {
 }
 
 function updateSummary() {
-  const activeCount = [...renderedEvents.values()].filter(
-    (element) => element.dataset.ackStatus === "pending",
-  ).length;
+  const activeCount = renderedPending.size;
   alertCount.textContent = String(activeCount);
-  emptyState.hidden = renderedEvents.size > 0;
+  emptyState.hidden = activeCount > 0;
 }
 
 function toggleCamera() {

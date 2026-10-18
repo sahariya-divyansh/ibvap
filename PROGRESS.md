@@ -301,3 +301,4 @@ IBVAP_RESTRICTED_ZONE=0.62,0.18;0.95,0.18;0.95,0.82;0.62,0.82
 - Task D2: Added camera registry loader, Pydantic v2 schemas, geometry resolver, and tests.
 - Task D3: Added threaded stream reader with latest-frame buffer, exponential backoff reconnect, and status machine.
 - Tasks D4+D5: Added per-camera live state, CameraWorker with isolated model/tracker state, CameraManager, and main lifespan integration.
+- Task H3: Hide reviewed alerts by default, animated dismiss on ack, show-reviewed toggle with persistence, and active alerts counter.

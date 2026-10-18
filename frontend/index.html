@@ -22,7 +22,10 @@
       <div id="alarm-banner" class="alarm-banner" hidden>Critical border event detected</div>
 
       <section class="live-controls" aria-label="Live camera and counts">
-        <button id="camera-toggle" type="button">Open Camera</button>
+        <div class="controls-actions">
+          <button id="camera-toggle" type="button">Open Camera</button>
+          <button id="reviewed-toggle" type="button" class="btn-toggle" aria-pressed="false">Show reviewed (0)</button>
+        </div>
         <div class="counts-panel" aria-live="polite">
           <div>
             <span>Person</span>
@@ -45,9 +48,10 @@
 
       <section id="alert-feed" class="alert-feed" aria-live="polite"></section>
       <section id="empty-state" class="empty-state">
-        <h2>No alerts yet</h2>
+        <h2>No pending alerts</h2>
         <p>New detection, fence, and restricted-zone alerts will appear here automatically.</p>
       </section>
+      <section id="reviewed-feed" class="alert-feed reviewed-feed" aria-live="polite" hidden></section>
     </main>
 
     <script src="app.js"></script>
