@@ -302,3 +302,4 @@ IBVAP_RESTRICTED_ZONE=0.62,0.18;0.95,0.18;0.95,0.82;0.62,0.82
 - Task D3: Added threaded stream reader with latest-frame buffer, exponential backoff reconnect, and status machine.
 - Tasks D4+D5: Added per-camera live state, CameraWorker with isolated model/tracker state, CameraManager, and main lifespan integration.
 - Task H3: Hide reviewed alerts by default, animated dismiss on ack, show-reviewed toggle with persistence, and active alerts counter.
+- Tasks D6+D7: Added DB schema migration with WAL/busy timeout, evidence_url derivation, and multi-camera REST endpoints (cameras, config, snapshot, stats, feed, and filters).
