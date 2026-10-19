@@ -1,0 +1,58 @@
+[
+  {
+    "camera_id": "cam_01",
+    "location": "BOP West Gate",
+    "status": "LIVE",
+    "fps": 12.4,
+    "latency_ms": 142,
+    "last_frame_age_s": 0.1,
+    "low_visibility": false,
+    "counts": {
+      "person": 2,
+      "vehicle": 0,
+      "animal": 1
+    }
+  },
+  {
+    "camera_id": "cam_02",
+    "location": "Perimeter Fence North",
+    "status": "DEGRADED",
+    "fps": 2.1,
+    "latency_ms": 310,
+    "last_frame_age_s": 0.8,
+    "low_visibility": true,
+    "counts": {
+      "person": 1,
+      "vehicle": 1,
+      "animal": 0
+    }
+  },
+  {
+    "camera_id": "cam_03",
+    "location": "Outpost East Hill",
+    "status": "OFFLINE",
+    "fps": 0.0,
+    "latency_ms": 0,
+    "last_frame_age_s": 42.0,
+    "low_visibility": false,
+    "counts": {
+      "person": 0,
+      "vehicle": 0,
+      "animal": 0
+    }
+  },
+  {
+    "camera_id": "cam_04",
+    "location": "Riverine Sector South",
+    "status": "LIVE",
+    "fps": 14.8,
+    "latency_ms": 115,
+    "last_frame_age_s": 0.2,
+    "low_visibility": false,
+    "counts": {
+      "person": 0,
+      "vehicle": 2,
+      "animal": 0
+    }
+  }
+]

@@ -3,26 +3,35 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>IBVAP &mdash; Live Alerts</title>
+    <title>IBVAP &mdash; Border Monitoring Dashboard</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <div id="unreachable-banner" class="unreachable-banner" hidden role="alert" aria-live="assertive">
+      <span class="unreachable-icon">&#9888;</span>
+      <span id="unreachable-text">Backend unreachable &mdash; retrying</span>
+    </div>
+
     <header class="topbar">
-      <div>
-        <h1>IBVAP &mdash; Live Alerts</h1>
-        <p id="connection-status">Connecting to backend...</p>
+      <div class="topbar-branding">
+        <div class="title-row">
+          <h1>IBVAP &mdash; Border Monitoring</h1>
+          <span id="mock-badge" class="badge-mock" hidden>MOCK MODE</span>
+        </div>
+        <p id="connection-status">Connecting...</p>
       </div>
       <div class="summary">
         <span id="alert-count">0</span>
-        <span>active alerts</span>
+        <span>pending alerts</span>
       </div>
     </header>
 
     <main>
-      <div id="alarm-banner" class="alarm-banner" hidden>Critical border event detected</div>
+      <div id="alarm-banner" class="alarm-banner" hidden role="alert" aria-live="assertive">
+        Critical border event detected
+      </div>
 
-      <section class="live-controls" aria-label="Live camera and counts">
-        <button id="camera-toggle" type="button">Open Camera</button>
+      <section class="live-controls" aria-label="Live object counts">
         <div class="counts-panel" aria-live="polite">
           <div>
             <span>Person</span>
@@ -39,17 +48,34 @@
         </div>
       </section>
 
-      <section id="camera-panel" class="camera-panel" hidden>
-        <img id="camera-feed" alt="Annotated live camera feed" />
+      <section class="grid-section" aria-label="Camera Feeds">
+        <div class="grid-header">
+          <div class="grid-header-left">
+            <h2>Live Feeds</h2>
+            <span id="camera-count-badge" class="feed-count">0 Cameras</span>
+          </div>
+          <div id="focus-hint" class="focus-hint" hidden>
+            <span>Focus Mode Active &mdash; Press <kbd>Esc</kbd> or click to restore grid</span>
+            <button id="exit-focus-btn" type="button" class="btn-subtle">Exit Focus</button>
+          </div>
+        </div>
+
+        <div id="camera-grid" class="camera-grid" role="region" aria-label="Multi-camera grid"></div>
       </section>
 
-      <section id="alert-feed" class="alert-feed" aria-live="polite"></section>
-      <section id="empty-state" class="empty-state">
-        <h2>No alerts yet</h2>
-        <p>New detection, fence, and restricted-zone alerts will appear here automatically.</p>
+      <section class="feed-section" aria-label="Alert Feed">
+        <div class="feed-header">
+          <h2>Alert Stream</h2>
+        </div>
+        <section id="alert-feed" class="alert-feed" aria-live="polite"></section>
+        <section id="empty-state" class="empty-state">
+          <h2>No alerts yet</h2>
+          <p>Detections, virtual fence crossings, and zone events will appear here in real time.</p>
+        </section>
       </section>
     </main>
 
+    <script src="api.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -1,0 +1,73 @@
+[
+  {
+    "event_id": "evt_001",
+    "camera_id": "cam_01",
+    "timestamp": "2026-10-18T10:30:15Z",
+    "event_type": "VIRTUAL_FENCE_CROSS",
+    "object_type": "person",
+    "track_id": 4,
+    "confidence": 0.92,
+    "severity": "HIGH",
+    "extra": {
+      "direction": "A_TO_B",
+      "latency_ms": 140
+    },
+    "evidence_url": "/evidence/evt_001.jpg",
+    "clip_url": null,
+    "evidence_path": "evidence/evt_001.jpg",
+    "ack_status": "pending"
+  },
+  {
+    "event_id": "evt_002",
+    "camera_id": "cam_01",
+    "timestamp": "2026-10-18T10:28:40Z",
+    "event_type": "LOITERING",
+    "object_type": "person",
+    "track_id": 2,
+    "confidence": 0.88,
+    "severity": "MEDIUM",
+    "extra": {
+      "dwell_seconds": 14.5,
+      "latency_ms": 155
+    },
+    "evidence_url": "/evidence/evt_002.jpg",
+    "clip_url": null,
+    "evidence_path": "evidence/evt_002.jpg",
+    "ack_status": "pending"
+  },
+  {
+    "event_id": "evt_003",
+    "camera_id": "cam_02",
+    "timestamp": "2026-10-18T10:25:10Z",
+    "event_type": "CAMERA_TAMPER",
+    "object_type": null,
+    "track_id": null,
+    "confidence": 1.0,
+    "severity": "HIGH",
+    "extra": {
+      "kind": "BLUR",
+      "latency_ms": 120
+    },
+    "evidence_url": null,
+    "clip_url": null,
+    "evidence_path": "",
+    "ack_status": "pending"
+  },
+  {
+    "event_id": "evt_004",
+    "camera_id": "cam_04",
+    "timestamp": "2026-10-18T10:20:00Z",
+    "event_type": "NEW_OBJECT_DETECTED",
+    "object_type": "vehicle",
+    "track_id": 7,
+    "confidence": 0.85,
+    "severity": "LOW",
+    "extra": {
+      "latency_ms": 110
+    },
+    "evidence_url": null,
+    "clip_url": null,
+    "evidence_path": "",
+    "ack_status": "confirmed"
+  }
+]
