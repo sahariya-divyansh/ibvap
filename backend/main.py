@@ -173,8 +173,26 @@ def list_cameras() -> list[dict[str, Any]]:
                 else None
             )
 
-        if raw_status == "LIVE" and fps < 3.0:
+        worker = manager.get(cid)
+        worker_tamper = (
+            worker.is_tamper_active()
+            if worker is not None and hasattr(worker, "is_tamper_active")
+            else False
+        )
+        live_tamper = (
+            live_state.is_tamper_active(cid)
+            if hasattr(live_state, "is_tamper_active")
+            else False
+        )
+        tamper_active = worker_tamper or live_tamper
+
+        if raw_status == "LIVE" and (fps < 3.0 or tamper_active):
             status = "DEGRADED"
+        elif raw_status == "DEGRADED":
+            if not tamper_active and fps >= 3.0:
+                status = "LIVE"
+            else:
+                status = "DEGRADED"
         else:
             status = raw_status
 

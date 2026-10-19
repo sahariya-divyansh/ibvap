@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from backend.camera_config import CameraConfig, FenceConfig
+from backend.camera_config import AnalyticsFlags, CameraConfig, FenceConfig
 from backend.camera_worker import CameraWorker
 from backend.config import Settings
 from backend.live_state import LiveDetectorState
@@ -47,7 +47,7 @@ class FakeResult:
 
     def __init__(self, boxes: list[FakeBox] | None = None) -> None:
         self.boxes = boxes or []
-        self.names = {0: "person", 2: "car"}
+        self.names = {0: "person", 2: "car", 15: "cat"}
 
 
 class FakeModel:
@@ -357,3 +357,202 @@ def test_offline_online_status_events_produced() -> None:
     assert ev_online["event_type"] == "CAMERA_ONLINE"
     assert ev_online["camera_id"] == "cam_status_test"
     assert ev_online["object_type"] == "camera"
+    assert ev_online["severity"] == "LOW"
+
+
+def test_event_severity_person_animal_and_unknown() -> None:
+    """Fence crossing by person is HIGH, by animal is LOW, unknown is MEDIUM."""
+    events: list[dict[str, Any]] = []
+    f1 = np.ones((100, 100, 3), dtype=np.uint8)
+    f2 = np.ones((100, 100, 3), dtype=np.uint8)
+
+    box_person_pre = FakeBox(track_id=1, xyxy=[40, 20, 60, 40], class_id=0)
+    box_animal_pre = FakeBox(track_id=2, xyxy=[70, 20, 90, 40], class_id=15)
+
+    box_person_post = FakeBox(track_id=1, xyxy=[40, 60, 60, 80], class_id=0)
+    box_animal_post = FakeBox(track_id=2, xyxy=[70, 60, 90, 80], class_id=15)
+
+    res1 = FakeResult(boxes=[box_person_pre, box_animal_pre])
+    res2 = FakeResult(boxes=[box_person_post, box_animal_post])
+
+    worker = CameraWorker(
+        cam=_make_dummy_cam(
+            fence=FenceConfig(start=[0.0, 50.0], end=[100.0, 50.0], alert_direction="ANY"),
+            zone=[],
+        ),
+        settings=_make_dummy_settings(),
+        reader_factory=lambda **kw: FakeReader(frames=[(f1, 1.0), (f2, 2.0)], **kw),
+        model_factory=lambda: FakeModel(script=[res1, res2]),
+        event_sink=lambda ev, **_kw: events.append(ev),
+    )
+    worker.start()
+    try:
+        assert _wait_until(
+            lambda: len([e for e in events if e.get("event_type") == "VIRTUAL_FENCE_CROSS"]) >= 2
+        )
+    finally:
+        worker.stop()
+
+    fence_events = [e for e in events if e.get("event_type") == "VIRTUAL_FENCE_CROSS"]
+    person_cross = next(e for e in fence_events if e["track_id"] == 1)
+    animal_cross = next(e for e in fence_events if e["track_id"] == 2)
+
+    assert person_cross["object_type"] == "person"
+    assert person_cross["severity"] == "HIGH"
+
+    assert animal_cross["object_type"] == "animal"
+    assert animal_cross["severity"] == "LOW"
+
+    # Test unknown event type fallback
+    unknown_ev = {
+        "event_id": "test-unknown-id",
+        "camera_id": "cam_01",
+        "event_type": "UNKNOWN_CUSTOM_TYPE",
+        "object_type": "item",
+        "track_id": 99,
+    }
+    worker._dispatch_event(unknown_ev)
+    assert unknown_ev["severity"] == "MEDIUM"
+
+    assert all(e.get("severity") in {"LOW", "MEDIUM", "HIGH"} for e in events)
+
+
+def test_health_flag_off_monitor_never_constructed_or_called() -> None:
+    """When analytics.health is False, FrameHealthMonitor is never constructed or called."""
+    events: list[dict[str, Any]] = []
+    worker = CameraWorker(
+        cam=_make_dummy_cam(analytics=AnalyticsFlags(health=False)),
+        settings=_make_dummy_settings(),
+        reader_factory=lambda **kw: FakeReader(**kw),
+        model_factory=lambda: FakeModel(),
+        event_sink=lambda ev, **_kw: events.append(ev),
+    )
+    assert worker._health_monitor is None
+    assert worker.is_tamper_active() is False
+
+
+class StepReader:
+    """Mock reader allowing synchronous step-by-step frame injection."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.frame: np.ndarray | None = None
+        self.ts: float = 0.0
+        self.status = StreamStatus.LIVE
+        self.fps = 15.0
+
+    def step(self, frame: np.ndarray, ts: float) -> None:
+        self.frame = frame
+        self.ts = ts
+
+    def latest(self) -> tuple[np.ndarray, float] | None:
+        if self.frame is None:
+            return None
+        return self.frame, self.ts
+
+    def start(self) -> None:
+        pass
+
+    def stop(self, timeout: float = 2.0) -> None:
+        pass
+
+
+def test_health_flag_on_blackout_emits_tamper_and_degraded_status() -> None:
+    """Blackout frames produce exactly one CAMERA_TAMPER event, DEGRADED status, clearing after 30s."""
+    events: list[dict[str, Any]] = []
+    clock_time = [100.0]
+    black_frame = np.zeros((120, 160, 3), dtype=np.uint8)
+
+    reader = StepReader()
+
+    worker = CameraWorker(
+        cam=_make_dummy_cam(analytics=AnalyticsFlags(health=True)),
+        settings=_make_dummy_settings(),
+        reader_factory=lambda **kw: reader,
+        model_factory=lambda: FakeModel(),
+        event_sink=lambda ev, **_kw: events.append(ev),
+        clock=lambda: clock_time[0],
+    )
+    assert worker._health_monitor is not None
+
+    worker.start()
+    try:
+        # Step 1: at 100.0s
+        clock_time[0] = 100.0
+        reader.step(black_frame, 100.0)
+        assert _wait_until(lambda: worker._health_monitor._last_check == 100.0)
+
+        # Step 2: at 101.0s
+        clock_time[0] = 101.0
+        reader.step(black_frame, 101.0)
+        assert _wait_until(lambda: worker._health_monitor._last_check == 101.0)
+
+        # Step 3: at 102.0s -> confirm_checks=3 reached!
+        clock_time[0] = 102.0
+        reader.step(black_frame, 102.0)
+        assert _wait_until(
+            lambda: len([e for e in events if e.get("event_type") == "CAMERA_TAMPER"]) == 1
+        )
+
+        tamper_events = [e for e in events if e.get("event_type") == "CAMERA_TAMPER"]
+        assert len(tamper_events) == 1
+        tev = tamper_events[0]
+        assert tev["object_type"] == "camera"
+        assert tev["track_id"] == 0
+        assert tev["evidence_path"] == ""
+        assert tev["extra"]["kind"] == "BLACKOUT"
+        assert tev["severity"] == "HIGH"
+        assert worker.is_tamper_active() is True
+        assert worker.status == "DEGRADED"
+
+        # Advance fake clock by 30 seconds
+        clock_time[0] = 132.5
+        assert worker.is_tamper_active() is False
+        assert worker.status == "LIVE"
+    finally:
+        worker.stop()
+
+
+def test_health_monitor_exception_handling_and_60s_backoff() -> None:
+    """Failing health.update does not crash worker and is skipped for 60s."""
+    clock_time = [100.0]
+    frame = np.ones((100, 100, 3), dtype=np.uint8)
+    call_count = [0]
+
+    def failing_update(f: np.ndarray, now: float) -> list[Any]:
+        call_count[0] += 1
+        raise RuntimeError("Simulated sensor crash")
+
+    reader = StepReader()
+
+    worker = CameraWorker(
+        cam=_make_dummy_cam(analytics=AnalyticsFlags(health=True)),
+        settings=_make_dummy_settings(),
+        reader_factory=lambda **kw: reader,
+        model_factory=lambda: FakeModel(),
+        clock=lambda: clock_time[0],
+    )
+    assert worker._health_monitor is not None
+    worker._health_monitor.update = failing_update
+
+    worker.start()
+    try:
+        # Frame 1: triggers exception and disables for 60s
+        clock_time[0] = 100.0
+        reader.step(frame, 100.0)
+        assert _wait_until(lambda: worker._health_disabled_until == 160.0)
+        assert call_count[0] == 1
+
+        # Frame 2 at 110.0 (within 60s window) -> health update must be skipped
+        clock_time[0] = 110.0
+        reader.step(frame, 110.0)
+        time.sleep(0.05)
+        assert call_count[0] == 1
+
+        # Advance beyond 60s window to 165.0
+        worker._health_monitor.update = lambda f, now: (call_count.__setitem__(0, call_count[0] + 1) or [])
+        clock_time[0] = 165.0
+        reader.step(frame, 165.0)
+        assert _wait_until(lambda: call_count[0] == 2)
+        assert worker._stop_event.is_set() is False
+    finally:
+        worker.stop()

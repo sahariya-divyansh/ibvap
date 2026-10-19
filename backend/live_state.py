@@ -21,6 +21,7 @@ class CameraLiveState:
         "latency_ms",
         "raw_frame",
         "status",
+        "tamper_active",
     )
 
     def __init__(
@@ -33,6 +34,7 @@ class CameraLiveState:
         fps: float = 0.0,
         latency_ms: float = 0.0,
         last_frame_ts: float | None = None,
+        tamper_active: bool = False,
     ) -> None:
         self.annotated_frame = annotated_frame
         self.annotated_jpeg = annotated_jpeg
@@ -42,6 +44,7 @@ class CameraLiveState:
         self.fps = fps
         self.latency_ms = latency_ms
         self.last_frame_ts = last_frame_ts
+        self.tamper_active = tamper_active
 
     def to_dict(self) -> dict[str, Any]:
         """Convert state to a plain dictionary for API responses."""
@@ -53,6 +56,7 @@ class CameraLiveState:
             "fps": self.fps,
             "latency_ms": self.latency_ms,
             "last_frame_ts": self.last_frame_ts,
+            "tamper_active": self.tamper_active,
         }
 
 
@@ -80,6 +84,7 @@ class LiveDetectorState:
         last_frame_ts: float | None = None,
         raw_frame: np.ndarray | None = None,
         annotated_jpeg: bytes | None = None,
+        tamper_active: bool = False,
     ) -> None:
         """Atomically publish new frame and metrics for a camera.
 
@@ -108,12 +113,21 @@ class LiveDetectorState:
             fps=fps,
             latency_ms=latency_ms,
             last_frame_ts=last_frame_ts,
+            tamper_active=tamper_active,
         )
 
         with self._lock:
             if camera_id not in self._cameras:
                 self._camera_order.append(camera_id)
             self._cameras[camera_id] = state
+
+    def is_tamper_active(self, camera_id: str | None = None) -> bool:
+        """Return True if a tamper condition is active for the camera."""
+        with self._lock:
+            target_id = camera_id if camera_id is not None else self._first_camera_id()
+            if target_id is None or target_id not in self._cameras:
+                return False
+            return self._cameras[target_id].tamper_active
 
     def update(
         self,

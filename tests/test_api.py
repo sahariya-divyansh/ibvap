@@ -35,6 +35,10 @@ class FakeWorker:
         self.cam = cam
         self.update_geometry_calls: list[tuple[Any, Any]] = []
         self._current_frame_size = (640, 480)
+        self.tamper_active = False
+
+    def is_tamper_active(self) -> bool:
+        return self.tamper_active
 
     def update_geometry(self, fence: Any, zone: Any) -> None:
         self.update_geometry_calls.append((fence, zone))
@@ -116,6 +120,57 @@ def test_cameras_shape_and_degraded_status(mock_app_state) -> None:
     cam02 = next(c for c in data if c["camera_id"] == "cam_02")
     assert cam02["status"] == "LIVE"
     assert cam02["fps"] == 15.0
+
+
+def test_cameras_reports_degraded_when_tamper_active(mock_app_state) -> None:
+    """GET /cameras reports DEGRADED when tamper is active, even at normal FPS."""
+    manager, _, _ = mock_app_state
+    client = TestClient(app)
+
+    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    # cam_01 has fps=15.0 (healthy FPS) but tamper_active=True
+    live_state.publish(
+        camera_id="cam_01",
+        annotated_frame=dummy_frame,
+        counts={"person": 1, "vehicle": 0, "animal": 0},
+        status="LIVE",
+        fps=15.0,
+        latency_ms=50.0,
+        last_frame_ts=100.0,
+        raw_frame=dummy_frame,
+        tamper_active=True,
+    )
+
+    resp = client.get("/cameras")
+    assert resp.status_code == 200
+    cam01 = next(c for c in resp.json() if c["camera_id"] == "cam_01")
+    assert cam01["status"] == "DEGRADED"
+
+    # Also test via worker is_tamper_active()
+    live_state.publish(
+        camera_id="cam_01",
+        annotated_frame=dummy_frame,
+        counts={"person": 1, "vehicle": 0, "animal": 0},
+        status="LIVE",
+        fps=15.0,
+        latency_ms=50.0,
+        last_frame_ts=100.0,
+        raw_frame=dummy_frame,
+        tamper_active=False,
+    )
+    worker1 = manager.get("cam_01")
+    worker1.tamper_active = True
+    resp = client.get("/cameras")
+    assert resp.status_code == 200
+    cam01 = next(c for c in resp.json() if c["camera_id"] == "cam_01")
+    assert cam01["status"] == "DEGRADED"
+
+    # Clear tamper
+    worker1.tamper_active = False
+    resp = client.get("/cameras")
+    assert resp.status_code == 200
+    cam01 = next(c for c in resp.json() if c["camera_id"] == "cam_01")
+    assert cam01["status"] == "LIVE"
 
 
 def test_unknown_camera_returns_404(mock_app_state) -> None:

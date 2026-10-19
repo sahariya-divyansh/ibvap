@@ -16,6 +16,9 @@ import cv2
 import numpy as np
 
 from backend import config
+from backend.analytics.health import FrameHealthMonitor
+from backend.analytics.severity import assign_severity
+from backend.analytics.types import EventCandidate, EventType, Severity
 from backend.camera_config import CameraConfig, FenceConfig, resolve_geometry
 from backend.config import Settings
 from backend.db import insert_event
@@ -90,6 +93,13 @@ class CameraWorker:
             on_status_change=self._on_status_change,
         )
 
+        # Health monitoring and tamper status
+        self._health_monitor: FrameHealthMonitor | None = None
+        if self.cam.analytics.health:
+            self._health_monitor = FrameHealthMonitor()
+        self._health_disabled_until: float = 0.0
+        self._last_tamper_ts: float | None = None
+
         if self.settings.display_enabled and not self.is_single_camera:
             LOGGER.info(
                 "Display preview disabled for camera '%s' (multi-camera mode active)",
@@ -107,6 +117,75 @@ class CameraWorker:
         LOGGER.info("Loading YOLO model for camera '%s'", self.cam.camera_id)
         self._model = self._model_factory()
         LOGGER.info("YOLO model ready for camera '%s'", self.cam.camera_id)
+
+    def is_tamper_active(self) -> bool:
+        """Return True if a CAMERA_TAMPER event was emitted within the last 30s."""
+        if self._last_tamper_ts is None:
+            return False
+        return (self._clock() - self._last_tamper_ts) < 30.0
+
+    @property
+    def status(self) -> str:
+        """Return camera lifecycle status, reporting DEGRADED when tampering or FPS < 3."""
+        reader_status = self.reader.status.value
+        if reader_status == "LIVE" and (self.is_tamper_active() or self.reader.fps < 3.0):
+            return "DEGRADED"
+        return reader_status
+
+    def _apply_severity(self, event: dict[str, Any]) -> None:
+        """Assign severity level to an event dictionary via assign_severity."""
+        event_type_str = str(event.get("event_type", ""))
+        try:
+            ev_type = EventType(event_type_str)
+        except (ValueError, KeyError):
+            LOGGER.warning(
+                "Invalid event_type '%s' for camera '%s'; defaulting severity to MEDIUM",
+                event_type_str,
+                self.cam.camera_id,
+            )
+            event["severity"] = Severity.MEDIUM.value
+            return
+
+        candidate = EventCandidate(
+            event_type=ev_type,
+            object_type=event.get("object_type"),
+            track_id=event.get("track_id"),
+            confidence=float(event.get("confidence", 1.0)),
+            extra=event.get("extra") if isinstance(event.get("extra"), dict) else {},
+        )
+        try:
+            sev = assign_severity(candidate, datetime.now())
+            event["severity"] = sev.value
+        except Exception:
+            LOGGER.exception(
+                "assign_severity failed for event_type '%s'; defaulting to MEDIUM",
+                event_type_str,
+            )
+            event["severity"] = Severity.MEDIUM.value
+
+    def _handle_tamper_candidate(self, cand: EventCandidate, capture_ts: float) -> None:
+        """Transform a health candidate into a persisted CAMERA_TAMPER event."""
+        latency_ms = max(0.0, (self._clock() - capture_ts) * 1000.0)
+        latency_int = round(latency_ms)
+
+        extra = dict(cand.extra) if isinstance(cand.extra, dict) else {}
+        extra["latency_ms"] = latency_int
+
+        event = {
+            "event_id": str(uuid4()),
+            "camera_id": self.cam.camera_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "event_type": cand.event_type.value if hasattr(cand.event_type, "value") else str(cand.event_type),
+            "object_type": "camera",
+            "track_id": 0,
+            "confidence": float(cand.confidence),
+            "evidence_path": "",
+            "ack_status": "pending",
+            "extra": extra,
+        }
+        self._apply_severity(event)
+        self._last_tamper_ts = self._clock()
+        self._dispatch_event(event)
 
     def _default_event_sink(
         self,
@@ -132,7 +211,12 @@ class CameraWorker:
                 )
 
         try:
-            insert_event(event, self.settings.database_path)
+            insert_event(
+                event,
+                self.settings.database_path,
+                severity=event.get("severity", "MEDIUM"),
+                extra=event.get("extra") if isinstance(event.get("extra"), dict) else None,
+            )
         except (sqlite3.Error, OSError) as exc:
             LOGGER.error("Failed to store event %s: %s", event.get("event_id"), exc)
 
@@ -143,6 +227,8 @@ class CameraWorker:
         detection: TrackedDetection | None = None,
     ) -> None:
         """Dispatch event through the configured sink with fallback signatures."""
+        if "severity" not in event or not event["severity"]:
+            self._apply_severity(event)
         try:
             self._event_sink(event, frame=frame, detection=detection)
         except TypeError:
@@ -176,9 +262,9 @@ class CameraWorker:
             "confidence": 1.0,
             "evidence_path": "",
             "ack_status": "pending",
-            "severity": "HIGH" if event_type == "CAMERA_OFFLINE" else "LOW",
             "extra": {},
         }
+        self._apply_severity(event)
         try:
             self._dispatch_event(event)
         except (sqlite3.Error, OSError):
@@ -297,6 +383,21 @@ class CameraWorker:
             last_processed_ts = capture_ts
 
             try:
+                # Frame health monitoring before detection (flag analytics.health)
+                if self._health_monitor is not None:
+                    now_mono = self._clock()
+                    if now_mono >= self._health_disabled_until:
+                        try:
+                            health_candidates = self._health_monitor.update(raw_frame, now_mono)
+                            for cand in health_candidates:
+                                self._handle_tamper_candidate(cand, capture_ts)
+                        except Exception:
+                            LOGGER.exception(
+                                "Health monitor failed for camera '%s'; disabling for 60s",
+                                self.cam.camera_id,
+                            )
+                            self._health_disabled_until = now_mono + 60.0
+
                 frame = raw_frame
                 # Resize if target_width is configured
                 if self.cam.target_width is not None and self.cam.target_width > 0:
@@ -349,7 +450,11 @@ class CameraWorker:
                                 detection.track_id,
                             )
                             event = build_new_object_event(self.cam.camera_id, detection)
-                            event["extra"] = {"latency_ms": latency_int}
+                            existing_extra = event.get("extra")
+                            extra_dict = dict(existing_extra) if isinstance(existing_extra, dict) else {}
+                            extra_dict["latency_ms"] = latency_int
+                            event["extra"] = extra_dict
+                            self._apply_severity(event)
                             self._dispatch_event(event)
 
                     # Evaluate fence and zone crossings
@@ -360,12 +465,16 @@ class CameraWorker:
                     events: list[dict[str, Any]] = []
                     if fem is not None:
                         events.extend(fem.process(detections, self.settings.evidence_dir))
-                    if zem is not None:
+                    if zem is not None and len(zem.zone.points) >= 3:
                         events.extend(zem.process(detections, self.settings.evidence_dir))
 
                     det_map = {d.track_id: d for d in detections}
                     for ev in events:
-                        ev["extra"] = {"latency_ms": latency_int}
+                        existing_extra = ev.get("extra")
+                        extra_dict = dict(existing_extra) if isinstance(existing_extra, dict) else {}
+                        extra_dict["latency_ms"] = latency_int
+                        ev["extra"] = extra_dict
+                        self._apply_severity(ev)
                         track_det = det_map.get(int(ev["track_id"]))
                         self._dispatch_event(ev, frame=frame, detection=track_det)
 
@@ -393,11 +502,12 @@ class CameraWorker:
                         camera_id=self.cam.camera_id,
                         annotated_frame=annotated,
                         counts=last_counts,
-                        status=self.reader.status.value,
+                        status=self.status,
                         fps=self.reader.fps,
                         latency_ms=latency_ms,
                         last_frame_ts=capture_ts,
                         raw_frame=raw_frame,
+                        tamper_active=self.is_tamper_active(),
                     )
 
                 if self.settings.display_enabled and self.is_single_camera:
