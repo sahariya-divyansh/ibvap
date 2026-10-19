@@ -31,7 +31,15 @@
         Critical border event detected
       </div>
 
+ feat/ui-grid
       <section class="live-controls" aria-label="Live object counts">
+
+      <section class="live-controls" aria-label="Live camera and counts">
+        <div class="controls-actions">
+          <button id="camera-toggle" type="button">Open Camera</button>
+          <button id="reviewed-toggle" type="button" class="btn-toggle" aria-pressed="false">Show reviewed (0)</button>
+        </div>
+ main
         <div class="counts-panel" aria-live="polite">
           <div>
             <span>Person</span>
@@ -63,6 +71,7 @@
         <div id="camera-grid" class="camera-grid" role="region" aria-label="Multi-camera grid"></div>
       </section>
 
+ feat/ui-grid
       <section class="feed-section" aria-label="Alert Feed">
         <div class="feed-header">
           <h2>Alert Stream</h2>
@@ -72,7 +81,14 @@
           <h2>No alerts yet</h2>
           <p>Detections, virtual fence crossings, and zone events will appear here in real time.</p>
         </section>
+
+      <section id="alert-feed" class="alert-feed" aria-live="polite"></section>
+      <section id="empty-state" class="empty-state">
+        <h2>No pending alerts</h2>
+        <p>New detection, fence, and restricted-zone alerts will appear here automatically.</p>
+ main
       </section>
+      <section id="reviewed-feed" class="alert-feed reviewed-feed" aria-live="polite" hidden></section>
     </main>
 
     <script src="api.js"></script>

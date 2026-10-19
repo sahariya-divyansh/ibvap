@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -12,11 +13,20 @@ from backend.config import get_settings
 _DB_LOCK = threading.Lock()
 
 
+def _connect(path: Path) -> sqlite3.Connection:
+    """Create a new SQLite connection configured with WAL and busy timeout."""
+    connection = sqlite3.connect(path, timeout=5.0)
+    connection.execute("PRAGMA busy_timeout = 5000")
+    return connection
+
+
 def init_db(db_path: Path | None = None) -> None:
-    """Create the SQLite database and events table if needed."""
+    """Create the SQLite database and events table if needed, applying migrations."""
     path = _resolve_db_path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with _DB_LOCK, sqlite3.connect(path) as connection:
+    with _DB_LOCK, _connect(path) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA busy_timeout = 5000")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS events (
@@ -28,11 +38,14 @@ def init_db(db_path: Path | None = None) -> None:
                 track_id INTEGER NOT NULL,
                 confidence REAL NOT NULL,
                 evidence_path TEXT NOT NULL,
-                ack_status TEXT NOT NULL DEFAULT 'pending'
+                ack_status TEXT NOT NULL DEFAULT 'pending',
+                severity TEXT NOT NULL DEFAULT 'MEDIUM',
+                extra TEXT NOT NULL DEFAULT '{}',
+                clip_path TEXT
             )
             """
         )
-        _ensure_ack_status_column(connection)
+        _migrate_schema(connection)
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)"
         )
@@ -42,12 +55,60 @@ def init_db(db_path: Path | None = None) -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type)"
         )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_cam_ts ON events(camera_id, timestamp)"
+        )
 
 
-def insert_event(event: dict[str, Any], db_path: Path | None = None) -> None:
+def _migrate_schema(connection: sqlite3.Connection) -> None:
+    """Idempotently add missing columns to existing databases."""
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(events)").fetchall()
+    }
+    if "ack_status" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN ack_status TEXT NOT NULL DEFAULT 'pending'"
+        )
+    if "severity" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN severity TEXT NOT NULL DEFAULT 'MEDIUM'"
+        )
+    if "extra" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'"
+        )
+    if "clip_path" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN clip_path TEXT"
+        )
+
+
+def insert_event(
+    event: dict[str, Any],
+    db_path: Path | None = None,
+    *,
+    severity: str = "MEDIUM",
+    extra: dict[str, Any] | None = None,
+    clip_path: str | None = None,
+) -> None:
     """Insert a structured event into SQLite."""
     path = _resolve_db_path(db_path)
-    with _DB_LOCK, sqlite3.connect(path) as connection:
+    sev = event.get("severity") or severity
+    ext = (
+        event.get("extra")
+        if event.get("extra") is not None
+        else (extra if extra is not None else {})
+    )
+    if isinstance(ext, dict):
+        ext_text = json.dumps(ext)
+    elif isinstance(ext, str):
+        ext_text = ext
+    else:
+        ext_text = "{}"
+    cp = event.get("clip_path") or clip_path
+
+    with _DB_LOCK, _connect(path) as connection:
         connection.execute(
             """
             INSERT INTO events (
@@ -59,27 +120,75 @@ def insert_event(event: dict[str, Any], db_path: Path | None = None) -> None:
                 track_id,
                 confidence,
                 evidence_path,
-                ack_status
+                ack_status,
+                severity,
+                extra,
+                clip_path
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                event["event_id"],
-                event["camera_id"],
-                event["timestamp"],
-                event["event_type"],
-                event["object_type"],
-                event["track_id"],
-                event["confidence"],
-                event["evidence_path"],
-                event.get("ack_status", "pending"),
+                str(event["event_id"]),
+                str(event["camera_id"]),
+                str(event["timestamp"]),
+                str(event["event_type"]),
+                str(event["object_type"]),
+                int(event["track_id"]),
+                float(event["confidence"]),
+                str(event.get("evidence_path", "")),
+                str(event.get("ack_status", "pending")),
+                str(sev),
+                ext_text,
+                str(cp) if cp is not None else None,
             ),
         )
+
+
+def convert_event_row(row: dict[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    """Convert a database row into an API-compliant event dictionary."""
+    data = dict(row)
+
+    # Parse extra JSON text -> dict
+    raw_extra = data.get("extra")
+    if isinstance(raw_extra, dict):
+        extra_dict = dict(raw_extra)
+    elif isinstance(raw_extra, str):
+        try:
+            parsed = json.loads(raw_extra)
+            extra_dict = parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            extra_dict = {}
+    else:
+        extra_dict = {}
+    data["extra"] = extra_dict
+
+    # Derive evidence_url from evidence_path
+    ev_path = data.get("evidence_path")
+    if ev_path:
+        filename = Path(str(ev_path)).name
+        data["evidence_url"] = f"/evidence/{filename}"
+    else:
+        data["evidence_url"] = None
+
+    # Derive clip_url from clip_path
+    cp_path = data.get("clip_path")
+    if cp_path:
+        filename = Path(str(cp_path)).name
+        data["clip_url"] = f"/evidence/{filename}"
+    else:
+        data["clip_url"] = None
+
+    if not data.get("severity"):
+        data["severity"] = "MEDIUM"
+
+    return data
 
 
 def list_events(
     camera_id: str | None = None,
     event_type: str | None = None,
+    severity: str | None = None,
+    ack_status: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
     limit: int | None = None,
@@ -96,6 +205,12 @@ def list_events(
     if event_type is not None:
         clauses.append("event_type = ?")
         params.append(event_type)
+    if severity is not None:
+        clauses.append("severity = ?")
+        params.append(severity)
+    if ack_status is not None:
+        clauses.append("ack_status = ?")
+        params.append(ack_status)
     if start_time is not None:
         clauses.append("timestamp >= ?")
         params.append(start_time)
@@ -110,7 +225,8 @@ def list_events(
         query += " LIMIT ?"
         params.append(limit)
 
-    return _fetch_all(query, params, db_path)
+    rows = _fetch_all(query, params, db_path)
+    return [convert_event_row(row) for row in rows]
 
 
 def get_event(event_id: str, db_path: Path | None = None) -> dict[str, Any] | None:
@@ -122,7 +238,7 @@ def get_event(event_id: str, db_path: Path | None = None) -> dict[str, Any] | No
     )
     if not rows:
         return None
-    return rows[0]
+    return convert_event_row(rows[0])
 
 
 def update_event_ack(
@@ -132,7 +248,7 @@ def update_event_ack(
 ) -> dict[str, Any] | None:
     """Update an event acknowledgement status and return the updated event."""
     path = _resolve_db_path(db_path)
-    with _DB_LOCK, sqlite3.connect(path) as connection:
+    with _DB_LOCK, _connect(path) as connection:
         connection.row_factory = sqlite3.Row
         cursor = connection.execute(
             "UPDATE events SET ack_status = ? WHERE event_id = ?",
@@ -146,19 +262,7 @@ def update_event_ack(
         ).fetchone()
     if row is None:
         return None
-    return dict(row)
-
-
-def _ensure_ack_status_column(connection: sqlite3.Connection) -> None:
-    """Add ack_status to existing Phase 4 databases."""
-    columns = {
-        row[1]
-        for row in connection.execute("PRAGMA table_info(events)").fetchall()
-    }
-    if "ack_status" not in columns:
-        connection.execute(
-            "ALTER TABLE events ADD COLUMN ack_status TEXT NOT NULL DEFAULT 'pending'"
-        )
+    return convert_event_row(dict(row))
 
 
 def _fetch_all(
@@ -168,7 +272,7 @@ def _fetch_all(
 ) -> list[dict[str, Any]]:
     """Run a SELECT query and return rows as dictionaries."""
     path = _resolve_db_path(db_path)
-    with _DB_LOCK, sqlite3.connect(path) as connection:
+    with _DB_LOCK, _connect(path) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(query, params).fetchall()
     return [dict(row) for row in rows]

@@ -8,6 +8,15 @@ Divyansh updates this file when merging each PR. Contributors propose the entry 
 ## [Unreleased]
 
 ### Added (planned for v1.0-demo)
+feat/release-prep
+- One-click release launcher run.bat, stop.bat, and camera pre-check script [D10]
+
+- Multi-camera REST API endpoints (cameras, config, snapshot, feed, stats) and DB schema migration with WAL [D6, D7]
+ main
+- Dismiss reviewed alerts with smooth collapse animation, reviewed toggle, and pending alert counter [H3]
+- Per-camera workers, camera manager, and thread-safe per-camera live state with legacy fallback [D4, D5]
+- Threaded stream reader with latest-frame buffer, exponential backoff reconnect, and status machine [D3]
+- Camera registry loader, schema validation, and geometry resolver with legacy fallback [D2]
 - Multi-camera support via `cameras.json` (per-camera worker, YOLO/tracker, fence, zone) — D2–D6
 - Auto-reconnecting stream reader; `CAMERA_OFFLINE` / `CAMERA_ONLINE` events — D3
 - Severity levels (LOW/MEDIUM/HIGH) — K1

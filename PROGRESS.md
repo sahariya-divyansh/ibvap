@@ -298,3 +298,12 @@ IBVAP_RESTRICTED_ZONE=0.62,0.18;0.95,0.18;0.95,0.82;0.62,0.82
 - Browser audio may require one user interaction before the first audible beep; the dashboard unlocks audio on the first pointer interaction.
 - Counts require tracker IDs, so first frames before ByteTrack assigns IDs may briefly show zero.
 - If no webcam or configured video source is available, `/stats` stays at zero and `/video_feed` waits for the detector to publish a frame.
+- Task D2: Added camera registry loader, Pydantic v2 schemas, geometry resolver, and tests.
+- Task D3: Added threaded stream reader with latest-frame buffer, exponential backoff reconnect, and status machine.
+- Tasks D4+D5: Added per-camera live state, CameraWorker with isolated model/tracker state, CameraManager, and main lifespan integration.
+- Task H3: Hide reviewed alerts by default, animated dismiss on ack, show-reviewed toggle with persistence, and active alerts counter.
+feat/release-prep
+- Task D10: Added run.bat, stop.bat, scripts/check_cameras.py with tests, and multi-camera documentation in README.md.
+
+- Tasks D6+D7: Added DB schema migration with WAL/busy timeout, evidence_url derivation, and multi-camera REST endpoints (cameras, config, snapshot, stats, feed, and filters).
+main

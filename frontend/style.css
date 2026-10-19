@@ -162,6 +162,12 @@ main {
   gap: 12px;
 }
 
+.controls-actions {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
 .counts-panel {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -587,6 +593,36 @@ h2 {
   filter: grayscale(0.4);
 }
 
+.alert.dismissing {
+  opacity: 0;
+  max-height: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border-top-width: 0 !important;
+  border-bottom-width: 0 !important;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-4px) scale(0.98);
+  transition: opacity 250ms ease, max-height 250ms ease, margin 250ms ease, padding 250ms ease, border-width 250ms ease, transform 250ms ease;
+}
+
+.reviewed-feed {
+  margin-top: 18px;
+  border-top: 1px dashed var(--line);
+  padding-top: 18px;
+}
+
+.reviewed-feed .alert {
+  opacity: 0.62;
+  filter: grayscale(0.35);
+}
+
+.reviewed-feed .alert:hover {
+  opacity: 0.85;
+}
+
 .evidence {
   width: 100%;
   aspect-ratio: 16 / 10;
@@ -694,6 +730,32 @@ button:disabled {
   opacity: 0.5;
 }
 
+.btn-toggle {
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-weight: 700;
+  transition: all 0.15s ease;
+}
+
+.btn-toggle:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+.btn-toggle.active {
+  background: var(--panel-muted);
+  color: var(--info);
+  border-color: var(--info);
+}
+
+.inline-error {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 8px;
+}
+
 .empty-state {
   margin-top: 32px;
   padding: 32px;
@@ -714,8 +776,15 @@ button:disabled {
   margin: 0;
 }
 
+ feat/ui-grid
 /* Responsiveness */
 @media (max-width: 768px) {
+
+  .controls-actions {
+    flex-wrap: wrap;
+  }
+
+ main
   .topbar {
     padding: 16px;
     flex-direction: column;
