@@ -16,12 +16,13 @@ import cv2
 import numpy as np
 
 from backend import config
+from backend.ai_enricher import WHITELISTED_EVENT_TYPES
 from backend.analytics.health import FrameHealthMonitor
 from backend.analytics.severity import assign_severity
 from backend.analytics.types import EventCandidate, EventType, Severity
 from backend.camera_config import CameraConfig, FenceConfig, resolve_geometry
 from backend.config import Settings
-from backend.db import insert_event
+from backend.db import insert_event, update_event_ai
 from backend.events import (
     Fence,
     FenceEventManager,
@@ -30,6 +31,7 @@ from backend.events import (
     TrackedDetection,
     build_new_object_event,
 )
+from backend.fallback_summary import rule_based_analysis
 from backend.live_state import LiveDetectorState
 from backend.stream_reader import StreamReader, StreamStatus
 from backend.utils.annotation import (
@@ -59,11 +61,13 @@ class CameraWorker:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         is_single_camera: bool = True,
+        enricher: Any | None = None,
     ) -> None:
         """Initialize camera worker with configuration and dependencies."""
         self.cam = cam
         self.settings = settings
         self.live_state = live_state
+        self.enricher = enricher
         self._model_factory = model_factory or self._default_model_factory
         self._event_sink = event_sink or self._default_event_sink
         self._clock = clock
@@ -194,6 +198,15 @@ class CameraWorker:
         detection: TrackedDetection | None = None,
     ) -> None:
         """Persist evidence crops and database event rows."""
+        self._persist_event(event, frame, detection)
+
+    def _persist_event(
+        self,
+        event: dict[str, Any],
+        frame: np.ndarray | None = None,
+        detection: TrackedDetection | None = None,
+    ) -> None:
+        """Persist evidence crops and database event rows."""
         if frame is not None and detection is not None and event.get("evidence_path"):
             try:
                 save_evidence_snapshot(
@@ -219,6 +232,56 @@ class CameraWorker:
             )
         except (sqlite3.Error, OSError) as exc:
             LOGGER.error("Failed to store event %s: %s", event.get("event_id"), exc)
+            return
+
+        if self.enricher is not None and event.get("event_id"):
+            self._submit_to_ai_enricher(event)
+
+    def _submit_to_ai_enricher(self, event: dict[str, Any]) -> None:
+        """Apply rule-based fallback and submit event to background AI enricher."""
+        event_id = str(event["event_id"])
+        rule_res = rule_based_analysis(event)
+        event_type = event.get("event_type")
+        is_gemini_eligible = event_type in WHITELISTED_EVENT_TYPES
+
+        if not self.enricher.enabled:
+            initial_status = "disabled"
+        elif is_gemini_eligible:
+            initial_status = "pending"
+        else:
+            initial_status = "done"
+
+        try:
+            update_event_ai(
+                event_id,
+                gemini_summary=rule_res.summary,
+                false_alarm_rating=rule_res.false_alarm_rating,
+                rating_reason=rule_res.rating_reason,
+                ai_source="rules",
+                ai_status=initial_status,
+                db_path=self.settings.database_path,
+            )
+        except (sqlite3.Error, OSError) as exc:
+            LOGGER.error("Failed to set initial AI status for event %s: %s", event_id, exc)
+
+        evidence_path = event.get("evidence_path")
+
+        def _lazy_load_image() -> bytes | None:
+            if not evidence_path:
+                return None
+            p = Path(str(evidence_path))
+            if p.is_file():
+                return p.read_bytes()
+            return None
+
+        try:
+            self.enricher.submit(
+                event_id=event_id,
+                meta=event,
+                image_loader=_lazy_load_image,
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("Failed to submit event %s to enricher: %s", event_id, exc)
 
     def _dispatch_event(
         self,

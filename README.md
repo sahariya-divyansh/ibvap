@@ -146,7 +146,32 @@ Event feed:      http://localhost:8000/events
 Live stats:      http://localhost:8000/stats
 MJPEG stream:    http://localhost:8000/video_feed
 Evidence images: http://localhost:8000/evidence/<filename>.jpg
+AI status:       http://localhost:8000/ai/status
 ```
+
+## Gemini AI Enrichment Layer
+
+IBVAP integrates Google Gemini via `google-genai` for advisory multimodal security event analysis and automated false-alarm risk assessment.
+
+### Setup and Environment Variables
+Set the following keys in your `.env` file:
+```env
+GEMINI_API_KEY=your_key_here
+IBVAP_GEMINI_ENABLED=true
+IBVAP_GEMINI_MODEL=gemini-2.5-flash
+IBVAP_GEMINI_RPM=8
+IBVAP_GEMINI_TIMEOUT=20
+IBVAP_GEMINI_MAX_IMAGE_PX=640
+```
+Verify connectivity and list compatible models with:
+```powershell
+python scripts/gemini_check.py
+```
+
+### Privacy & Data Handling Note
+- **Cloud Transmission**: Evidence crop images and event metadata leave this machine and are processed by Google Gemini.
+- **Data Policy**: On Google AI Studio free tier, content may be reviewed by human reviewers and used to train Google products. Only use consented video footage.
+- **Local Mode**: Setting `IBVAP_GEMINI_ENABLED=false` (or leaving `GEMINI_API_KEY` unset) keeps all detection, tracking, and rule-based fallback summaries 100% local with zero outbound network calls.
 
 ## How To Use / Demo Walkthrough
 

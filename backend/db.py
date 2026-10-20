@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,13 @@ def init_db(db_path: Path | None = None) -> None:
                 ack_status TEXT NOT NULL DEFAULT 'pending',
                 severity TEXT NOT NULL DEFAULT 'MEDIUM',
                 extra TEXT NOT NULL DEFAULT '{}',
-                clip_path TEXT
+                clip_path TEXT,
+                gemini_summary TEXT,
+                false_alarm_rating TEXT,
+                rating_reason TEXT,
+                ai_source TEXT,
+                ai_status TEXT NOT NULL DEFAULT 'disabled',
+                ai_updated_at TEXT
             )
             """
         )
@@ -57,6 +64,9 @@ def init_db(db_path: Path | None = None) -> None:
         )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_cam_ts ON events(camera_id, timestamp)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_false_alarm ON events(false_alarm_rating)"
         )
 
 
@@ -81,6 +91,30 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
     if "clip_path" not in columns:
         connection.execute(
             "ALTER TABLE events ADD COLUMN clip_path TEXT"
+        )
+    if "gemini_summary" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN gemini_summary TEXT"
+        )
+    if "false_alarm_rating" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN false_alarm_rating TEXT"
+        )
+    if "rating_reason" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN rating_reason TEXT"
+        )
+    if "ai_source" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN ai_source TEXT"
+        )
+    if "ai_status" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN ai_status TEXT NOT NULL DEFAULT 'disabled'"
+        )
+    if "ai_updated_at" not in columns:
+        connection.execute(
+            "ALTER TABLE events ADD COLUMN ai_updated_at TEXT"
         )
 
 
@@ -181,6 +215,13 @@ def convert_event_row(row: dict[str, Any] | sqlite3.Row) -> dict[str, Any]:
     if not data.get("severity"):
         data["severity"] = "MEDIUM"
 
+    data["gemini_summary"] = data.get("gemini_summary")
+    data["false_alarm_rating"] = data.get("false_alarm_rating")
+    data["rating_reason"] = data.get("rating_reason")
+    data["ai_source"] = data.get("ai_source")
+    data["ai_status"] = data.get("ai_status") or "disabled"
+    data["ai_updated_at"] = data.get("ai_updated_at")
+
     return data
 
 
@@ -191,6 +232,7 @@ def list_events(
     ack_status: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
+    false_alarm_rating: str | None = None,
     limit: int | None = None,
     db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
@@ -217,6 +259,9 @@ def list_events(
     if end_time is not None:
         clauses.append("timestamp <= ?")
         params.append(end_time)
+    if false_alarm_rating is not None:
+        clauses.append("false_alarm_rating = ?")
+        params.append(false_alarm_rating)
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
 
@@ -254,6 +299,59 @@ def update_event_ack(
             "UPDATE events SET ack_status = ? WHERE event_id = ?",
             (ack_status, event_id),
         )
+        if cursor.rowcount == 0:
+            return None
+        row = connection.execute(
+            "SELECT * FROM events WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return convert_event_row(dict(row))
+
+
+def update_event_ai(
+    event_id: str,
+    *,
+    gemini_summary: str | None = None,
+    false_alarm_rating: str | None = None,
+    rating_reason: str | None = None,
+    ai_source: str | None = None,
+    ai_status: str | None = None,
+    ai_updated_at: str | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Update AI enrichment fields for an event and return updated row."""
+    path = _resolve_db_path(db_path)
+    updates: list[str] = []
+    params: list[Any] = []
+
+    if gemini_summary is not None:
+        updates.append("gemini_summary = ?")
+        params.append(gemini_summary)
+    if false_alarm_rating is not None:
+        updates.append("false_alarm_rating = ?")
+        params.append(false_alarm_rating)
+    if rating_reason is not None:
+        updates.append("rating_reason = ?")
+        params.append(rating_reason)
+    if ai_source is not None:
+        updates.append("ai_source = ?")
+        params.append(ai_source)
+    if ai_status is not None:
+        updates.append("ai_status = ?")
+        params.append(ai_status)
+
+    now_iso = ai_updated_at or datetime.now(UTC).isoformat()
+    updates.append("ai_updated_at = ?")
+    params.append(now_iso)
+
+    params.append(event_id)
+    query = f"UPDATE events SET {', '.join(updates)} WHERE event_id = ?"
+
+    with _DB_LOCK, _connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        cursor = connection.execute(query, params)
         if cursor.rowcount == 0:
             return None
         row = connection.execute(

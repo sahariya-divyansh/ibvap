@@ -87,6 +87,13 @@ def _parse_project_path(raw_value: str) -> Path:
     return PROJECT_ROOT / path
 
 
+DEFAULT_GEMINI_ENABLED = True
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"  # check which model your key can use
+DEFAULT_GEMINI_RPM = 8.0
+DEFAULT_GEMINI_TIMEOUT = 20.0
+DEFAULT_GEMINI_MAX_IMAGE_PX = 640
+
+
 @dataclass(frozen=True)
 class Settings:
     """Runtime settings for the detector."""
@@ -106,11 +113,30 @@ class Settings:
     evidence_dir: Path
     database_path: Path
     display_enabled: bool
+    gemini_api_key: str | None = None
+    gemini_enabled: bool = False
+    gemini_model: str = DEFAULT_GEMINI_MODEL
+    gemini_rpm: float = DEFAULT_GEMINI_RPM
+    gemini_timeout: float = DEFAULT_GEMINI_TIMEOUT
+    gemini_max_image_px: int = DEFAULT_GEMINI_MAX_IMAGE_PX
 
 
 def get_settings() -> Settings:
     """Build settings from .env/environment values with project defaults."""
     _load_env_file()
+
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    if os.getenv("IBVAP_GEMINI_ENABLED") is not None:
+        gemini_enabled = _parse_bool(os.getenv("IBVAP_GEMINI_ENABLED", ""))
+    else:
+        gemini_enabled = bool(gemini_api_key)
+
+    gemini_model = os.getenv("IBVAP_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+    gemini_rpm = float(os.getenv("IBVAP_GEMINI_RPM", str(DEFAULT_GEMINI_RPM)))
+    gemini_timeout = float(os.getenv("IBVAP_GEMINI_TIMEOUT", str(DEFAULT_GEMINI_TIMEOUT)))
+    gemini_max_image_px = int(
+        os.getenv("IBVAP_GEMINI_MAX_IMAGE_PX", str(DEFAULT_GEMINI_MAX_IMAGE_PX))
+    )
 
     return Settings(
         model_path=os.getenv("IBVAP_MODEL_PATH", DEFAULT_MODEL_PATH),
@@ -166,6 +192,12 @@ def get_settings() -> Settings:
         display_enabled=_parse_bool(
             os.getenv("IBVAP_DISPLAY_ENABLED", str(DEFAULT_DISPLAY_ENABLED))
         ),
+        gemini_api_key=gemini_api_key,
+        gemini_enabled=gemini_enabled,
+        gemini_model=gemini_model,
+        gemini_rpm=gemini_rpm,
+        gemini_timeout=gemini_timeout,
+        gemini_max_image_px=gemini_max_image_px,
     )
 
 

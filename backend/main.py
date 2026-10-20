@@ -7,6 +7,7 @@ import math
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import cv2
@@ -16,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from backend.ai_enricher import AIEnricher
 from backend.camera_config import (
     CameraConfigError,
     FenceConfig,
@@ -24,8 +26,16 @@ from backend.camera_config import (
 )
 from backend.camera_manager import CameraManager
 from backend.config import Settings, get_settings
-from backend.db import get_event, init_db, list_events, update_event_ack
+from backend.db import (
+    get_event,
+    init_db,
+    list_events,
+    update_event_ack,
+    update_event_ai,
+)
 from backend.detector import Detector
+from backend.fallback_summary import rule_based_analysis
+from backend.gemini_client import AnalysisResult, GeminiAnalyzer
 from backend.live_state import LiveDetectorState
 
 LOGGER = logging.getLogger(__name__)
@@ -37,7 +47,49 @@ detector_thread: threading.Thread | None = None
 detector_lock = threading.Lock()
 live_state = LiveDetectorState()
 camera_manager: CameraManager | None = None
+ai_enricher: AIEnricher | None = None
 _CONFIG_LOCK = threading.Lock()
+
+
+def make_ai_on_result(database_path: Path) -> Any:
+    """Create a persistent callback to update DB when AI enrichment finishes."""
+    def handle_ai_result(event_id: str, result: AnalysisResult, source: str, status: str) -> None:
+        if source == "gemini" and status == "success":
+            update_event_ai(
+                event_id,
+                gemini_summary=result.summary,
+                false_alarm_rating=result.false_alarm_rating,
+                rating_reason=result.rating_reason,
+                ai_source="gemini",
+                ai_status="done",
+                db_path=database_path,
+            )
+        elif status in ("failed", "fallback", "offline"):
+            update_event_ai(
+                event_id,
+                ai_status="failed",
+                db_path=database_path,
+            )
+        elif status == "disabled":
+            update_event_ai(
+                event_id,
+                ai_status="disabled",
+                db_path=database_path,
+            )
+        elif status == "skipped_whitelist":
+            update_event_ai(
+                event_id,
+                ai_status="done",
+                db_path=database_path,
+            )
+    return handle_ai_result
+
+
+def get_ai_enricher() -> AIEnricher | None:
+    """Retrieve the AI enricher, supporting test injection via app.state."""
+    if hasattr(app.state, "ai_enricher") and app.state.ai_enricher is not None:
+        return app.state.ai_enricher
+    return ai_enricher
 
 
 class AckRequest(BaseModel):
@@ -103,15 +155,39 @@ def get_camera_manager() -> CameraManager:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize storage and start/stop camera workers."""
-    global camera_manager
+    """Initialize storage, AI enricher, and start/stop camera workers."""
+    global camera_manager, ai_enricher
     init_db(settings.database_path)
     settings.evidence_dir.mkdir(parents=True, exist_ok=True)
+
+    if getattr(app.state, "ai_enricher", None) is None:
+        ai_analyzer = None
+        if settings.gemini_enabled:
+            try:
+                ai_analyzer = GeminiAnalyzer(
+                    model=settings.gemini_model,
+                    timeout=settings.gemini_timeout,
+                    max_image_px=settings.gemini_max_image_px,
+                )
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Could not initialize GeminiAnalyzer: %s", exc)
+
+        ai_enricher = AIEnricher(
+            analyzer=ai_analyzer,
+            fallback=rule_based_analysis,
+            on_result=make_ai_on_result(settings.database_path),
+            rpm=settings.gemini_rpm,
+        )
+        app.state.ai_enricher = ai_enricher
+    else:
+        ai_enricher = app.state.ai_enricher
 
     # Allow tests to inject a camera manager before startup to bypass real hardware/YOLO
     if getattr(app.state, "camera_manager", None) is not None:
         camera_manager = app.state.camera_manager
         yield
+        if ai_enricher is not None and hasattr(ai_enricher, "stop"):
+            ai_enricher.stop()
         return
 
     try:
@@ -124,11 +200,14 @@ async def lifespan(app: FastAPI):
         cameras=cameras,
         settings=settings,
         live_state=live_state,
+        enricher=ai_enricher,
     )
     camera_manager.start_all()
     yield
     if camera_manager is not None:
         camera_manager.stop_all()
+    if ai_enricher is not None and hasattr(ai_enricher, "stop"):
+        ai_enricher.stop()
     detector_stop_event.set()
 
 
@@ -372,6 +451,38 @@ def update_camera_config(
     }
 
 
+@app.get("/ai/status")
+def ai_status() -> dict[str, Any]:
+    """Return status snapshot of the AI enrichment layer."""
+    enricher = get_ai_enricher()
+    model_name = settings.gemini_model
+    if enricher is None:
+        return {
+            "enabled": False,
+            "model": model_name,
+            "online": False,
+            "queue_size": 0,
+            "calls_last_minute": 0,
+            "last_error": None,
+        }
+
+    if enricher.analyzer is not None:
+        try:
+            model_name = enricher.analyzer.model
+        except Exception:  # noqa: BLE001
+            model_name = settings.gemini_model
+
+    status = enricher.get_status()
+    return {
+        "enabled": status.get("enabled", False),
+        "model": model_name,
+        "online": status.get("online", False),
+        "queue_size": status.get("queue_size", 0),
+        "calls_last_minute": status.get("calls_last_minute", 0),
+        "last_error": status.get("last_error"),
+    }
+
+
 @app.get("/events")
 def read_events(
     camera_id: str | None = None,
@@ -380,6 +491,7 @@ def read_events(
     ack_status: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
+    false_alarm_rating: str | None = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[dict[str, Any]]:
     """Return stored events newest first with optional query filters."""
@@ -393,6 +505,11 @@ def read_events(
             status_code=422,
             detail="Invalid ack_status filter: must be pending, confirmed, or rejected",
         )
+    if false_alarm_rating is not None and false_alarm_rating not in {"LOW", "MEDIUM", "HIGH"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid false_alarm_rating filter: must be LOW, MEDIUM, or HIGH",
+        )
 
     return list_events(
         camera_id=camera_id,
@@ -401,6 +518,7 @@ def read_events(
         ack_status=ack_status,
         start_time=start_time,
         end_time=end_time,
+        false_alarm_rating=false_alarm_rating,
         limit=limit,
         db_path=settings.database_path,
     )
@@ -413,6 +531,42 @@ def read_event(event_id: str) -> dict[str, Any]:
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     return event
+
+
+@app.post("/events/{event_id}/analyze", status_code=202)
+def analyze_event_route(event_id: str) -> dict[str, Any]:
+    """Trigger forced re-analysis of an event using Gemini AI."""
+    event = get_event(event_id, settings.database_path)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    enricher = get_ai_enricher()
+    if enricher is None or not enricher.enabled:
+        raise HTTPException(status_code=503, detail="AI enrichment is disabled")
+
+    update_event_ai(
+        event_id,
+        ai_status="pending",
+        db_path=settings.database_path,
+    )
+
+    evidence_path = event.get("evidence_path")
+
+    def _lazy_load_image() -> bytes | None:
+        if not evidence_path:
+            return None
+        p = Path(str(evidence_path))
+        if p.is_file():
+            return p.read_bytes()
+        return None
+
+    enricher.submit(
+        event_id=event_id,
+        meta=event,
+        image_loader=_lazy_load_image,
+        force=True,
+    )
+    return {"status": "accepted", "event_id": event_id}
 
 
 @app.post("/events/{event_id}/ack")

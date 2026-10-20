@@ -24,12 +24,14 @@ class CameraManager:
         settings: Settings,
         *,
         live_state: LiveDetectorState | None = None,
+        enricher: Any | None = None,
         worker_factory: Callable[..., Any] = CameraWorker,
     ) -> None:
         """Create camera workers for all registered camera configs."""
         self.cameras = list(cameras)
         self.settings = settings
         self.live_state = live_state
+        self.enricher = enricher
         self._worker_factory = worker_factory
         self._workers: dict[str, Any] = {}
 
@@ -40,6 +42,7 @@ class CameraManager:
                 settings,
                 live_state=live_state,
                 is_single_camera=is_single,
+                enricher=enricher,
             )
 
     def start_all(self) -> None:
@@ -70,9 +73,11 @@ class CameraManager:
         )
 
     def stop_all(self, timeout: float = 2.0) -> None:
-        """Stop all camera workers cleanly."""
+        """Stop all camera workers cleanly and shut down the enricher."""
         for worker in self._workers.values():
             worker.stop(timeout=timeout)
+        if self.enricher is not None and hasattr(self.enricher, "stop"):
+            self.enricher.stop()
         LOGGER.info("Stopped all camera workers")
 
     def get(self, camera_id: str) -> Any | None:
