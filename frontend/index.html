@@ -7,6 +7,16 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <!-- Print Only Incident Report Header -->
+    <header class="print-only-header">
+      <h1>IBVAP &mdash; Operational Incident Report</h1>
+      <div class="print-meta-grid">
+        <div>Generated: <strong id="print-timestamp">&mdash;</strong></div>
+        <div>Active Scope: <strong id="print-scope">All Cameras</strong></div>
+        <div>Incident Count: <strong id="print-count">0 incidents</strong></div>
+      </div>
+    </header>
+
     <div id="unreachable-banner" class="unreachable-banner" hidden role="alert" aria-live="assertive">
       <span class="unreachable-icon">&#9888;</span>
       <span id="unreachable-text">Backend unreachable &mdash; retrying</span>
@@ -20,9 +30,17 @@
         </div>
         <p id="connection-status">Connecting...</p>
       </div>
-      <div class="summary">
-        <span id="alert-count">0</span>
-        <span>pending alerts</span>
+
+      <div class="topbar-actions">
+        <button id="sound-alarm-toggle" type="button" class="btn-icon-toggle active" aria-pressed="true" title="Toggle audio alert buzzer">
+          <span id="sound-toggle-icon">&#128266;</span>
+          <span id="sound-toggle-text">Sound: ON</span>
+        </button>
+        <a href="calibrate.html" class="btn-subtle" id="nav-calibrate-link">Calibration &rarr;</a>
+        <div class="summary">
+          <span id="alert-count">0</span>
+          <span>pending alerts</span>
+        </div>
       </div>
     </header>
 
@@ -31,15 +49,10 @@
         Critical border event detected
       </div>
 
- feat/ui-grid
-      <section class="live-controls" aria-label="Live object counts">
-
-      <section class="live-controls" aria-label="Live camera and counts">
+      <section class="live-controls" aria-label="Live controls and counts">
         <div class="controls-actions">
-          <button id="camera-toggle" type="button">Open Camera</button>
           <button id="reviewed-toggle" type="button" class="btn-toggle" aria-pressed="false">Show reviewed (0)</button>
         </div>
- main
         <div class="counts-panel" aria-live="polite">
           <div>
             <span>Person</span>
@@ -71,25 +84,160 @@
         <div id="camera-grid" class="camera-grid" role="region" aria-label="Multi-camera grid"></div>
       </section>
 
- feat/ui-grid
+      <!-- Analytics Visualizations Panel (Task H5) -->
+      <section id="analytics-section" class="analytics-section" aria-label="Analytics & KPIs">
+        <div class="analytics-header">
+          <h2>Telemetry &amp; Operational Analytics</h2>
+          <span class="badge-mock" style="color: var(--ok); border-color: var(--ok); background: var(--ok-soft);">Real-Time</span>
+        </div>
+        <div class="analytics-grid">
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <h3 class="chart-title">Activity Frequency (Last 12 Hours)</h3>
+            </div>
+            <canvas id="chart-hourly-canvas" class="chart-canvas" width="320" height="180" aria-label="Events per hour histogram"></canvas>
+            <div id="hourly-chart-summary" class="cal-instructions" style="padding: 6px 10px; font-size: 11px;">Activity distribution across recent hours</div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <h3 class="chart-title">Severity Split</h3>
+            </div>
+            <canvas id="chart-severity-canvas" class="chart-canvas" width="320" height="180" aria-label="Severity breakdown donut chart"></canvas>
+            <div class="chart-legend">
+              <span class="chart-legend-item"><span class="legend-dot" style="background: var(--danger);"></span> HIGH</span>
+              <span class="chart-legend-item"><span class="legend-dot" style="background: var(--warn);"></span> MEDIUM</span>
+              <span class="chart-legend-item"><span class="legend-dot" style="background: var(--info);"></span> LOW</span>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <h3 class="chart-title">Resolution Ratio (Ack / Review)</h3>
+            </div>
+            <canvas id="chart-status-canvas" class="chart-canvas" width="320" height="180" aria-label="Resolution ratio stacked bar chart"></canvas>
+            <div class="chart-legend">
+              <span class="chart-legend-item"><span class="legend-dot" style="background: var(--warn);"></span> Pending</span>
+              <span class="chart-legend-item"><span class="legend-dot" style="background: var(--ok);"></span> Confirmed</span>
+              <span class="chart-legend-item"><span class="legend-dot" style="background: var(--reject);"></span> Rejected</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Filter & Search Toolbar (Task H4 & H6) -->
+      <section class="filter-toolbar" aria-label="Alert Filters & Search">
+        <div class="filter-row">
+          <div class="filter-group">
+            <label for="filter-camera-select">Camera</label>
+            <select id="filter-camera-select" class="filter-select">
+              <option value="">All Cameras</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label for="filter-type-select">Event Type</label>
+            <select id="filter-type-select" class="filter-select">
+              <option value="">All Types</option>
+              <option value="VIRTUAL_FENCE_CROSS">Virtual Fence Crossing</option>
+              <option value="RESTRICTED_ZONE_ENTRY">Restricted Zone Entry</option>
+              <option value="LOITERING">Loitering</option>
+              <option value="CAMERA_TAMPER">Camera Tamper</option>
+              <option value="SUSPICIOUS_SEQUENCE">Suspicious Sequence</option>
+              <option value="NEW_OBJECT_DETECTED">New Object Detected</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label>Severity</label>
+            <div class="filter-checkboxes">
+              <label class="filter-chip sev-high checked">
+                <input type="checkbox" id="filter-sev-high" value="HIGH" checked /> HIGH
+              </label>
+              <label class="filter-chip sev-medium checked">
+                <input type="checkbox" id="filter-sev-medium" value="MEDIUM" checked /> MED
+              </label>
+              <label class="filter-chip sev-low checked">
+                <input type="checkbox" id="filter-sev-low" value="LOW" checked /> LOW
+              </label>
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <label for="filter-ack-select">Status</label>
+            <select id="filter-ack-select" class="filter-select">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label for="filter-timerange-select">Time</label>
+            <select id="filter-timerange-select" class="filter-select">
+              <option value="all">All Time</option>
+              <option value="15m">Last 15 min</option>
+              <option value="1h">Last 1 hour</option>
+              <option value="today">Today</option>
+            </select>
+          </div>
+
+          <div class="filter-group" style="flex: 1; min-width: 200px;">
+            <label for="filter-search-input">Search</label>
+            <input type="search" id="filter-search-input" class="filter-input" placeholder="Track ID, kind, location..." style="width: 100%;" />
+          </div>
+        </div>
+
+        <div class="filter-meta-row">
+          <div class="filter-actions">
+            <span id="filter-count" class="filter-count-badge">Showing 0 of 0 alerts</span>
+            <button id="clear-filters-btn" type="button" class="btn-subtle" style="padding: 4px 10px; font-size: 12px;">Reset Filters</button>
+          </div>
+          <div class="filter-actions">
+            <button id="export-csv-btn" type="button" class="btn-subtle" title="Export filtered records to spreadsheet CSV">Export CSV</button>
+            <button id="print-report-btn" type="button" class="btn-subtle" title="Print structured audit report">Print Report</button>
+          </div>
+        </div>
+      </section>
+
       <section class="feed-section" aria-label="Alert Feed">
         <div class="feed-header">
           <h2>Alert Stream</h2>
         </div>
         <section id="alert-feed" class="alert-feed" aria-live="polite"></section>
         <section id="empty-state" class="empty-state">
-          <h2>No alerts yet</h2>
-          <p>Detections, virtual fence crossings, and zone events will appear here in real time.</p>
+          <h2>No matching alerts</h2>
+          <p>Detections, virtual fence crossings, and zone events matching current filters will appear here.</p>
         </section>
-
-      <section id="alert-feed" class="alert-feed" aria-live="polite"></section>
-      <section id="empty-state" class="empty-state">
-        <h2>No pending alerts</h2>
-        <p>New detection, fence, and restricted-zone alerts will appear here automatically.</p>
- main
+        <section id="reviewed-feed" class="alert-feed reviewed-feed" aria-live="polite" hidden></section>
       </section>
-      <section id="reviewed-feed" class="alert-feed reviewed-feed" aria-live="polite" hidden></section>
     </main>
+
+    <!-- Evidence Modal Dialog (Task H3) -->
+    <div id="evidence-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3 id="modal-title">Evidence &amp; Event Inspection</h3>
+          <button id="modal-close-btn" type="button" class="modal-close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-media-container" id="modal-media-container">
+            <img id="modal-img" alt="Captured incident frame" hidden />
+            <video id="modal-video" controls hidden></video>
+            <div id="modal-no-media" style="color: var(--muted); font-size: 13px;">No media capture available for this event</div>
+          </div>
+          <div class="modal-details-grid" id="modal-details-grid"></div>
+        </div>
+        <div class="modal-footer">
+          <button id="modal-dismiss-btn" type="button" class="btn-subtle">Close</button>
+          <div class="modal-footer-actions">
+            <button id="modal-reject-btn" type="button" class="btn-subtle" data-action="rejected" style="background: var(--reject); color: #0d141e;">Reject False Positive</button>
+            <button id="modal-confirm-btn" type="button" class="btn-primary" data-action="confirmed" style="background: var(--ok); color: #07100d;">Confirm Threat</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script src="api.js"></script>
     <script src="app.js"></script>

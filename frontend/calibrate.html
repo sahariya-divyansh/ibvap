@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IBVAP &mdash; Camera Calibration</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="calibration-page">
+    <div id="unreachable-banner" class="unreachable-banner" hidden role="alert" aria-live="assertive">
+      <span class="unreachable-icon">&#9888;</span>
+      <span id="unreachable-text">Backend unreachable &mdash; retrying</span>
+    </div>
+
+    <header class="topbar">
+      <div class="topbar-branding">
+        <div class="title-row">
+          <h1>IBVAP &mdash; Camera Calibration</h1>
+          <span id="mock-badge" class="badge-mock" hidden>MOCK MODE</span>
+        </div>
+        <p id="connection-status">Configuring virtual fences and restricted zones</p>
+      </div>
+      <div class="topbar-actions">
+        <a href="index.html" class="btn-subtle">&larr; Return to Dashboard</a>
+      </div>
+    </header>
+
+    <main class="calibration-main">
+      <!-- Toolbar & Camera Selector -->
+      <section class="cal-toolbar-panel" aria-label="Calibration Controls">
+        <div class="cal-toolbar-group">
+          <label for="camera-select" class="cal-label">Select Camera</label>
+          <select id="camera-select" class="cal-select" aria-label="Select camera to calibrate"></select>
+          <button id="refresh-snapshot-btn" type="button" class="btn-subtle" title="Fetch latest raw frame">Refresh Snapshot</button>
+        </div>
+
+        <div class="cal-toolbar-group">
+          <span class="cal-label">Drawing Tool</span>
+          <div class="cal-btn-group" role="radiogroup" aria-label="Drawing tool">
+            <button id="tool-fence-btn" type="button" class="cal-tool-btn active" role="radio" aria-checked="true">
+              Virtual Fence (2 pts)
+            </button>
+            <button id="tool-zone-btn" type="button" class="cal-tool-btn" role="radio" aria-checked="false">
+              Restricted Zone (&ge; 3 pts)
+            </button>
+          </div>
+        </div>
+
+        <div class="cal-toolbar-group">
+          <label for="direction-select" class="cal-label">Fence Alert Direction</label>
+          <select id="direction-select" class="cal-select" aria-label="Fence alert direction">
+            <option value="ANY">ANY (Both directions)</option>
+            <option value="A_TO_B">A &rarr; B (Crossing left-to-right)</option>
+            <option value="B_TO_A">B &rarr; A (Crossing right-to-left)</option>
+          </select>
+        </div>
+
+        <div class="cal-toolbar-actions">
+          <button id="close-zone-btn" type="button" class="btn-subtle" hidden>Close Zone</button>
+          <button id="undo-btn" type="button" class="btn-subtle" title="Undo last point (Backspace)">Undo</button>
+          <button id="clear-btn" type="button" class="btn-subtle" title="Clear current tool geometry">Clear</button>
+          <button id="save-config-btn" type="button" class="btn-primary" disabled>Save Configuration</button>
+        </div>
+      </section>
+
+      <!-- Status Messages Banner -->
+      <div id="cal-status-banner" class="cal-status-banner" hidden role="status" aria-live="polite"></div>
+
+      <!-- Canvas & Image Viewport -->
+      <section class="cal-canvas-section" aria-label="Interactive Calibration Viewport">
+        <div class="cal-canvas-container" id="canvas-container">
+          <img id="snapshot-img" alt="Camera snapshot for calibration" class="cal-snapshot-img" />
+          <canvas id="cal-canvas" class="cal-canvas"></canvas>
+          <div id="cal-loading-overlay" class="cal-loading-overlay" hidden>
+            <div class="spinner"></div>
+            <span>Loading snapshot &amp; configuration...</span>
+          </div>
+          <div id="cal-error-overlay" class="cal-error-overlay" hidden>
+            <span class="offline-icon">&#9888;</span>
+            <span id="cal-error-text">Failed to load snapshot</span>
+            <button id="cal-retry-btn" type="button" class="btn-subtle">Retry</button>
+          </div>
+        </div>
+
+        <div class="cal-instructions">
+          <span><strong>Instructions:</strong> Click on the frame to place points. Press <kbd>Esc</kbd> to cancel drawing. Fence requires exactly 2 points. Zone requires at least 3 points (double-click to complete).</span>
+        </div>
+      </section>
+
+      <!-- Debug Inspection Panel -->
+      <section class="cal-debug-panel" aria-label="Debug Inspection Panel">
+        <div class="cal-debug-header">
+          <h3>Debug Payload Inspector (CONTRACTS &sect;5 &amp; &sect;7)</h3>
+          <span id="geometry-status-badge" class="badge-status">Geometry Incomplete</span>
+        </div>
+        <div class="cal-debug-grid">
+          <div>
+            <h4>Normalized Coordinates (Client Draft)</h4>
+            <pre id="debug-draft-json" class="debug-code"><code>{}</code></pre>
+          </div>
+          <div>
+            <h4>Server-Validated Configuration (Last Saved / Loaded)</h4>
+            <pre id="debug-saved-json" class="debug-code"><code>{}</code></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="api.js"></script>
+    <script src="calibrate.js"></script>
+  </body>
+</html>

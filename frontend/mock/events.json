@@ -69,5 +69,111 @@
     "clip_url": null,
     "evidence_path": "",
     "ack_status": "confirmed"
+  },
+  {
+    "event_id": "evt_005",
+    "camera_id": "cam_01",
+    "timestamp": "2026-10-18T10:15:30Z",
+    "event_type": "RESTRICTED_ZONE_ENTRY",
+    "object_type": "vehicle",
+    "track_id": 9,
+    "confidence": 0.94,
+    "severity": "HIGH",
+    "extra": {
+      "latency_ms": 135
+    },
+    "evidence_url": "/evidence/evt_005.jpg",
+    "clip_url": null,
+    "evidence_path": "evidence/evt_005.jpg",
+    "ack_status": "pending"
+  },
+  {
+    "event_id": "evt_006",
+    "camera_id": "cam_02",
+    "timestamp": "2026-10-18T09:55:00Z",
+    "event_type": "LOITERING",
+    "object_type": "animal",
+    "track_id": 11,
+    "confidence": 0.81,
+    "severity": "LOW",
+    "extra": {
+      "dwell_seconds": 18.2,
+      "latency_ms": 145
+    },
+    "evidence_url": null,
+    "clip_url": null,
+    "evidence_path": "",
+    "ack_status": "rejected"
+  },
+  {
+    "event_id": "evt_007",
+    "camera_id": "cam_04",
+    "timestamp": "2026-10-18T09:40:12Z",
+    "event_type": "VIRTUAL_FENCE_CROSS",
+    "object_type": "person",
+    "track_id": 14,
+    "confidence": 0.96,
+    "severity": "HIGH",
+    "extra": {
+      "direction": "B_TO_A",
+      "latency_ms": 128
+    },
+    "evidence_url": "/evidence/evt_007.jpg",
+    "clip_url": "/evidence/evt_007.mp4",
+    "evidence_path": "evidence/evt_007.jpg",
+    "ack_status": "pending"
+  },
+  {
+    "event_id": "evt_008",
+    "camera_id": "cam_01",
+    "timestamp": "2026-10-18T09:12:45Z",
+    "event_type": "SUSPICIOUS_SEQUENCE",
+    "object_type": "person",
+    "track_id": 16,
+    "confidence": 0.91,
+    "severity": "HIGH",
+    "extra": {
+      "repeat_count": 3,
+      "latency_ms": 150
+    },
+    "evidence_url": null,
+    "clip_url": null,
+    "evidence_path": "",
+    "ack_status": "pending"
+  },
+  {
+    "event_id": "evt_009",
+    "camera_id": "cam_03",
+    "timestamp": "2026-10-18T08:30:00Z",
+    "event_type": "CAMERA_TAMPER",
+    "object_type": null,
+    "track_id": null,
+    "confidence": 1.0,
+    "severity": "HIGH",
+    "extra": {
+      "kind": "BLACKOUT",
+      "latency_ms": 95
+    },
+    "evidence_url": null,
+    "clip_url": null,
+    "evidence_path": "",
+    "ack_status": "confirmed"
+  },
+  {
+    "event_id": "evt_010",
+    "camera_id": "cam_04",
+    "timestamp": "2026-10-18T08:05:20Z",
+    "event_type": "NEW_OBJECT_DETECTED",
+    "object_type": "person",
+    "track_id": 19,
+    "confidence": 0.89,
+    "severity": "LOW",
+    "extra": {
+      "latency_ms": 105
+    },
+    "evidence_url": null,
+    "clip_url": null,
+    "evidence_path": "",
+    "ack_status": "confirmed"
   }
 ]

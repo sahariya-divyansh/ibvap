@@ -18,6 +18,53 @@
   // Local cache for mock events to support stateful mock acks
   let mockEventsCache = null;
 
+  // In-memory mock camera config store matching CONTRACTS §7
+  const mockConfigStore = {};
+
+  function getDefaultMockConfig(cameraId) {
+    if (cameraId === "cam_02") {
+      return {
+        fence: { start: [0.1, 0.4], end: [0.9, 0.4], alert_direction: "A_TO_B" },
+        zone: [[0.2, 0.2], [0.8, 0.2], [0.8, 0.7], [0.2, 0.7]],
+        frame_size: [640, 360],
+      };
+    }
+    return {
+      fence: { start: [0.0, 0.5], end: [1.0, 0.5], alert_direction: "ANY" },
+      zone: [[0.62, 0.18], [0.95, 0.18], [0.95, 0.82], [0.62, 0.82]],
+      frame_size: [640, 360],
+    };
+  }
+
+  function createMockSnapshotSvg(cameraId) {
+    const safeId = String(cameraId).replace(/[^a-zA-Z0-9_-]/g, "");
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="100%" height="100%">
+        <defs>
+          <linearGradient id="sky" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#0f1926"/>
+            <stop offset="100%" stop-color="#18273a"/>
+          </linearGradient>
+          <linearGradient id="ground" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#151e28"/>
+            <stop offset="100%" stop-color="#0a1017"/>
+          </linearGradient>
+          <pattern id="cal-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+            <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect width="640" height="180" fill="url(#sky)"/>
+        <rect y="180" width="640" height="180" fill="url(#ground)"/>
+        <rect width="640" height="360" fill="url(#cal-grid)"/>
+        <line x1="0" y1="180" x2="640" y2="180" stroke="rgba(104,199,255,0.25)" stroke-width="1"/>
+        <text x="24" y="36" fill="#68c7ff" font-family="monospace" font-size="13" font-weight="bold">SNAPSHOT // ${safeId}</text>
+        <text x="24" y="56" fill="rgba(255,255,255,0.5)" font-family="monospace" font-size="11">RAW RESOLUTION: 640x360 · STANDBY</text>
+        <circle cx="320" cy="180" r="4" fill="#ffb454"/>
+      </svg>
+    `.trim();
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  }
+
   async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -154,7 +201,34 @@
         if (!mockEventsCache) {
           mockEventsCache = await fetchWithTimeout("mock/events.json");
         }
-        return mockEventsCache;
+        let results = [...mockEventsCache];
+        if (params.camera_id) {
+          results = results.filter((e) => e.camera_id === params.camera_id);
+        }
+        if (params.event_type) {
+          results = results.filter((e) => e.event_type === params.event_type);
+        }
+        if (params.severity) {
+          results = results.filter((e) => e.severity === params.severity);
+        }
+        if (params.ack_status) {
+          results = results.filter((e) => (e.ack_status || "pending") === params.ack_status);
+        }
+        if (params.start_time) {
+          const startTime = new Date(params.start_time).getTime();
+          results = results.filter((e) => new Date(e.timestamp).getTime() >= startTime);
+        }
+        if (params.end_time) {
+          const endTime = new Date(params.end_time).getTime();
+          results = results.filter((e) => new Date(e.timestamp).getTime() <= endTime);
+        }
+        if (params.limit) {
+          const lim = parseInt(params.limit, 10);
+          if (Number.isFinite(lim) && lim > 0) {
+            results = results.slice(0, lim);
+          }
+        }
+        return results;
       }
       const search = new URLSearchParams(params).toString();
       const url = search ? `${API_BASE}/events?${search}` : `${API_BASE}/events`;
@@ -179,6 +253,74 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
+      });
+    },
+
+    getCameraSnapshotUrl(cameraId) {
+      if (isMock) {
+        return createMockSnapshotSvg(cameraId);
+      }
+      return `${API_BASE}/cameras/${encodeURIComponent(cameraId)}/snapshot?t=${Date.now()}`;
+    },
+
+    async fetchCameraConfig(cameraId) {
+      if (isMock) {
+        if (isFail) {
+          throw new Error("Mock mode simulated client failure (?fail=1)");
+        }
+        if (!mockConfigStore[cameraId]) {
+          mockConfigStore[cameraId] = getDefaultMockConfig(cameraId);
+        }
+        // Deep copy
+        return JSON.parse(JSON.stringify(mockConfigStore[cameraId]));
+      }
+      return await fetchWithTimeout(`${API_BASE}/cameras/${encodeURIComponent(cameraId)}/config`);
+    },
+
+    async updateCameraConfig(cameraId, configBody) {
+      if (isMock) {
+        if (isFail) {
+          throw new Error("Mock mode simulated client failure (?fail=1)");
+        }
+        // Validate geometry according to CONTRACTS §5 & §7
+        if (!configBody.fence || !Array.isArray(configBody.fence.start) || !Array.isArray(configBody.fence.end)) {
+          throw new Error("Invalid fence configuration: start and end points required");
+        }
+        if (configBody.fence.start.length !== 2 || configBody.fence.end.length !== 2) {
+          throw new Error("Fence points must have exactly 2 coordinates [x, y]");
+        }
+        if (configBody.zone && configBody.zone.length > 0 && configBody.zone.length < 3) {
+          throw new Error("Zone must be empty or contain at least 3 points");
+        }
+        const validated = {
+          fence: {
+            start: [
+              Math.max(0, Math.min(1, Number(configBody.fence.start[0]))),
+              Math.max(0, Math.min(1, Number(configBody.fence.start[1]))),
+            ],
+            end: [
+              Math.max(0, Math.min(1, Number(configBody.fence.end[0]))),
+              Math.max(0, Math.min(1, Number(configBody.fence.end[1]))),
+            ],
+            alert_direction: ["ANY", "A_TO_B", "B_TO_A"].includes(configBody.fence.alert_direction)
+              ? configBody.fence.alert_direction
+              : "ANY",
+          },
+          zone: Array.isArray(configBody.zone)
+            ? configBody.zone.map((pt) => [
+                Math.max(0, Math.min(1, Number(pt[0]))),
+                Math.max(0, Math.min(1, Number(pt[1]))),
+              ])
+            : [],
+          frame_size: [640, 360],
+        };
+        mockConfigStore[cameraId] = validated;
+        return JSON.parse(JSON.stringify(validated));
+      }
+      return await fetchWithTimeout(`${API_BASE}/cameras/${encodeURIComponent(cameraId)}/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(configBody),
       });
     },
   };
