@@ -44,7 +44,7 @@ def test_smoke_analytics_stubs() -> None:
     assert candidate.event_type == EventType.LOITERING
 
     # 2. Severity (K1, K4)
-    sev = assign_severity(candidate, datetime.now())
+    sev = assign_severity(candidate, datetime(2026, 10, 19, 12, 0))
     assert sev == Severity.MEDIUM
     assert is_suppressed(candidate) is False
 
